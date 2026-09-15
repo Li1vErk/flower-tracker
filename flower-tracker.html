@@ -1,0 +1,4507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>花园复活追踪</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.22.0/babel.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #0c0c10;
+      color: #e0d8ec;
+      font-family: 'Noto Sans SC', 'PingFang SC', sans-serif;
+      min-height: 100vh;
+    }
+
+    /* ========== 悬停显示删除按钮 ========== */
+    .flower-row:hover .del-btn {
+      opacity: 0.6 !important;
+      pointer-events: auto !important;
+    }
+
+    .flower-row:hover .del-btn:hover {
+      opacity: 1 !important;
+      background: #e0505030 !important;
+    }
+
+    /* ========== 枯萎状态呼吸灯 ========== */
+    @keyframes pulse-red {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+        box-shadow: 0 0 6px currentColor;
+      }
+
+      50% {
+        opacity: 0.5;
+        transform: scale(1.4);
+        box-shadow: 0 0 14px currentColor;
+      }
+    }
+
+    @keyframes pulse-orange {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+        box-shadow: 0 0 4px currentColor;
+      }
+
+      50% {
+        opacity: 0.9;
+        transform: scale(1.1);
+        box-shadow: 0 0 6px currentColor;
+      }
+    }
+
+    @keyframes pulse-green {
+
+      0%,
+      100% {
+        opacity: 1;
+        transform: scale(1);
+        box-shadow: 0 0 4px currentColor;
+      }
+
+      50% {
+        opacity: 0.9;
+        transform: scale(1.1);
+        box-shadow: 0 0 6px currentColor;
+      }
+    }
+
+    .status-dot-wilted {
+      animation: pulse-red 1.5s ease-in-out infinite;
+    }
+
+    .status-dot-urgent {
+      animation: pulse-orange 2s ease-in-out infinite;
+    }
+
+    .status-dot-alive {
+      animation: pulse-green 3s ease-in-out infinite;
+    }
+
+    /* ========== 展开收起过渡动画 ========== */
+    .collapse-enter {
+      max-height: 0;
+      opacity: 0;
+      overflow: hidden;
+      transition: max-height 0.35s ease-out, opacity 0.25s ease-out;
+    }
+
+    .collapse-enter-active {
+      max-height: 600px;
+      opacity: 1;
+    }
+
+    .collapse-exit {
+      max-height: 600px;
+      opacity: 1;
+      overflow: hidden;
+      transition: max-height 0.3s ease-in, opacity 0.2s ease-in;
+    }
+
+    .collapse-exit-active {
+      max-height: 0;
+      opacity: 0;
+    }
+
+    /* ========== 弹窗背景淡入淡出 ========== */
+    .modal-backdrop-enter {
+      opacity: 0;
+      transition: opacity 0.2s ease-out;
+    }
+
+    .modal-backdrop-enter-active {
+      opacity: 1;
+    }
+
+    .modal-backdrop-exit {
+      opacity: 1;
+      transition: opacity 0.15s ease-in;
+    }
+
+    .modal-backdrop-exit-active {
+      opacity: 0;
+    }
+
+    /* ========== 弹窗内容缩放淡入 ========== */
+    .modal-content-enter {
+      opacity: 0;
+      transform: scale(0.92) translateY(10px);
+      transition: opacity 0.25s ease-out, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .modal-content-enter-active {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+
+    .modal-content-exit {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+      transition: opacity 0.15s ease-in, transform 0.15s ease-in;
+    }
+
+    .modal-content-exit-active {
+      opacity: 0;
+      transform: scale(0.96) translateY(8px);
+    }
+
+    /* ========== 深色模式滚动条 ========== */
+    .dark-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    .dark-scrollbar::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 3px;
+    }
+
+    .dark-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(180, 143, 208, 0.3);
+      border-radius: 3px;
+    }
+
+    .dark-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(180, 143, 208, 0.5);
+    }
+
+    /* ========== 浅色模式滚动条 ========== */
+    .light-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    .light-scrollbar::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.05);
+      border-radius: 3px;
+    }
+
+    .light-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(123, 79, 160, 0.3);
+      border-radius: 3px;
+    }
+
+    .light-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(123, 79, 160, 0.5);
+    }
+
+    /* ========== 悬停显示删除按钮和折叠按钮 ========== */
+    .flower-row:hover .del-btn,
+    .account-card:hover .collapse-btn {
+      opacity: 0.6 !important;
+      pointer-events: auto !important;
+    }
+
+    .flower-row:hover .del-btn:hover,
+    .account-card:hover .collapse-btn:hover {
+      opacity: 1 !important;
+      background: #e0505030 !important;
+    }
+
+    /* ========== Toast 滑入动画 ========== */
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(40px) scale(0.92); }
+      to   { opacity: 1; transform: translateX(0) scale(1); }
+    }
+  </style>
+
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💮</text></svg>">
+  <base target="_blank">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
+</head>
+
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const STORAGE_KEY = "xhx-tracker-v1";
+    const COLLECTION_KEY = "xhx-collection-v1";
+    const DEFAULT_MS = 336 * 3600 * 1000;
+    const EPHEMERAL_MS = 48 * 3600 * 1000;
+
+    // ========== 本地存储键 ==========
+    const THEME_KEY = "xhx-theme";
+    const REMINDER_KEY = "xhx-account-reminders";
+    const COLLAPSED_KEY = "xhx-collapsed-accounts";
+    const SORT_KEY = "xhx-collection-sort";
+    const PINNED_KEY = "xhx-pinned-account";
+    const TODAY_KEY = "xhx-today-revived";
+    const TODAY_IDS_KEY = "xhx-revived-today-ids";
+    const SNAPSHOT_KEY = "xhx-autobackup-v2";
+
+    // ========== 备份 / 同步常量 ==========
+    const BACKUP_APP = "flower-tracker";
+    const BACKUP_VERSION = 2;
+    const SNAPSHOT_MAX = 3;
+    const SNAPSHOT_MAX_BYTES = 500 * 1024;
+    const SHARE_PREFIX = "FT2|";
+
+    // ========== 本地存储读写 ==========
+    function readJSON(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw === null) return fallback;
+        const v = JSON.parse(raw);
+        return v === null || v === undefined ? fallback : v;
+      } catch { return fallback; }
+    }
+
+    function writeJSON(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch { }
+    }
+
+    // 花朵稳定键：账号ID + 花名，跨导入 / 重命名都保持稳定（uid 在导入后会重新生成）
+    function stableFlowerKey(accountId, flowerName) {
+      return `${accountId}|${flowerName}`;
+    }
+
+    // 剥离批量删除用的临时勾选标记，避免导入后整列表处于待删状态
+    function stripSelected(goals) {
+      const out = {};
+      Object.entries(goals || {}).forEach(([name, g]) => {
+        if (!g || typeof g !== "object") return;
+        const { _selected, ...rest } = g;
+        out[name] = rest;
+      });
+      return out;
+    }
+
+    // 账号合并：按 accountId 合并，花朵按 name 去重（已存在的不覆盖）
+    function mergeAccountList(base, incoming) {
+      const next = (base || []).map(a => ({ ...a, flowers: [...(a.flowers || [])] }));
+      for (const p of incoming || []) {
+        if (!p || !p.accountId) continue;
+        const idx = next.findIndex(a => a.accountId === p.accountId);
+        if (idx === -1) {
+          next.push({
+            id: p.id || uid(),
+            accountId: p.accountId,
+            flowers: (p.flowers || []).map(f => ({ ...f, id: f.id || uid() })),
+          });
+        } else {
+          for (const f of p.flowers || []) {
+            if (!next[idx].flowers.some(mf => mf.name === f.name)) {
+              next[idx].flowers.push({ ...f, id: f.id || uid() });
+            }
+          }
+        }
+      }
+      return next;
+    }
+
+    // 收集目标合并：同名取 needed / owned 的较大值（两边记的是同一批真实花，相加会翻倍）
+    // 注意 _selected 只是批量删除的临时勾选标记，任何一侧都不该带进结果
+    function mergeGoals(base, incoming) {
+      const out = {};
+      Object.entries(base || {}).forEach(([name, g]) => {
+        if (!g || typeof g !== "object") return;
+        const { _selected, ...rest } = g;
+        out[name] = rest;
+      });
+      Object.entries(incoming || {}).forEach(([name, g]) => {
+        if (!g || typeof g !== "object") return;
+        const { _selected, ...rest } = g;
+        const prev = out[name];
+        if (!prev) { out[name] = rest; return; }
+        out[name] = {
+          ...prev,
+          needed: Math.max(prev.needed || 0, g.needed || 0),
+          owned: Math.max(prev.owned || 0, g.owned || 0),
+        };
+      });
+      return out;
+    }
+
+    function mergeIdLists(base, incoming) {
+      return Array.from(new Set([...(base || []), ...(incoming || [])]));
+    }
+
+    // ========== 备份信封 ==========
+    function buildBackup(scope = "full") {
+      const head = { _app: BACKUP_APP, _version: BACKUP_VERSION, _exportedAt: new Date().toISOString() };
+      const prefs = {
+        theme: localStorage.getItem(THEME_KEY) || "dark",
+        collectionSort: localStorage.getItem(SORT_KEY) || "progress",
+        accountReminders: readJSON(REMINDER_KEY, []),
+        collapsedAccounts: readJSON(COLLAPSED_KEY, []),
+        pinnedAccount: readJSON(PINNED_KEY, null),
+      };
+      if (scope === "accounts") {
+        return { ...head, accounts: readJSON(STORAGE_KEY, []), collectionGoals: {}, prefs: {} };
+      }
+      if (scope === "prefs") {
+        return { ...head, accounts: [], collectionGoals: {}, prefs };
+      }
+      return { ...head, accounts: readJSON(STORAGE_KEY, []), collectionGoals: stripSelected(readJSON(COLLECTION_KEY, {})), prefs };
+    }
+
+    // 解析备份文本：兼容旧版「裸数组」备份
+    function parseBackup(text) {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return { _app: BACKUP_APP, _version: 1, accounts: parsed, collectionGoals: {}, prefs: {} };
+      }
+      if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.accounts)) return null;
+      if (parsed._app && parsed._app !== BACKUP_APP) return null;
+      return parsed;
+    }
+
+    function fmtBackupTime(iso) {
+      if (!iso) return "未知时间";
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return "未知时间";
+      const p = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    // ========== 分享码（LZ-String 压缩，缺失时降级为 base64） ==========
+    function encodeShare(payload) {
+      const json = JSON.stringify(payload);
+      if (window.LZString) {
+        try { return SHARE_PREFIX + window.LZString.compressToEncodedURIComponent(json); } catch { }
+      }
+      try { return SHARE_PREFIX + "B64." + btoa(unescape(encodeURIComponent(json))); } catch { return ""; }
+    }
+
+    function decodeShare(code) {
+      let text = String(code || "").trim().replace(/\s+/g, "");
+      if (!text) return "";
+      if (text.startsWith(SHARE_PREFIX)) text = text.slice(SHARE_PREFIX.length);
+      if (text.startsWith("B64.")) {
+        try { return decodeURIComponent(escape(atob(text.slice(4)))); } catch { return ""; }
+      }
+      if (window.LZString) {
+        try {
+          const out = window.LZString.decompressFromEncodedURIComponent(text);
+          if (out) return out;
+        } catch { }
+      }
+      try { return decodeURIComponent(escape(atob(text))); } catch { return ""; }
+    }
+
+    // ========== 自动快照（滚动保留最近 N 份「改动前」的状态） ==========
+    // 返回是否真的写入了一份新快照
+    function pushSnapshot(json) {
+      if (!json || json.length > SNAPSHOT_MAX_BYTES) return false;
+      const list = readJSON(SNAPSHOT_KEY, []);
+      const arr = Array.isArray(list) ? list : [];
+      if (arr[0] && arr[0].data === json) return false;
+      writeJSON(SNAPSHOT_KEY, [{ at: Date.now(), data: json }, ...arr].slice(0, SNAPSHOT_MAX));
+      return true;
+    }
+
+    function snapshotSummary(json) {
+      try {
+        const accounts = JSON.parse(json);
+        const flowers = accounts.reduce((s, a) => s + (a.flowers?.length || 0), 0);
+        return { accounts: accounts.length, flowers };
+      } catch { return { accounts: 0, flowers: 0 }; }
+    }
+
+    // ========== 音频上下文 ==========
+    // 复用一个 AudioContext，并在首次用户交互时解锁自动播放限制
+    let __audioCtx = null;
+
+    function getAudioCtx() {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        if (!__audioCtx) __audioCtx = new Ctx();
+        if (__audioCtx.state === "suspended") __audioCtx.resume().catch(() => { });
+        return __audioCtx;
+      } catch { return null; }
+    }
+
+    function unlockAudioOnce() {
+      const unlock = () => {
+        const ctx = getAudioCtx();
+        if (ctx) ctx.resume().catch(() => { });
+        document.removeEventListener("pointerdown", unlock);
+        document.removeEventListener("keydown", unlock);
+      };
+      document.addEventListener("pointerdown", unlock);
+      document.addEventListener("keydown", unlock);
+    }
+
+    // ========== 珍稀花常量定义 ==========
+    const RARE_FLOWERS = [
+      // 蔷薇系
+      "白色蔷薇", "粉色蔷薇", "红色蔷薇", "黄色蔷薇",
+      // 黑色系
+      "黑色罗布麻", "黑色玫瑰", "黑色茑萝花", "黑色郁金香",
+      // 绿色系
+      "绿色梅花", "绿色桃花",
+      // 紫色系
+      "紫色百合", "紫色龙胆", "紫色昙花", "紫色薰衣草", "紫色胭脂花", "紫色夜来香", "紫色鸢尾",
+      // 夕雾系
+      "粉色夕雾", "蓝色夕雾", "白色夕雾", "紫色夕雾",
+      // 其他
+      "七彩彩虹菊",
+    ];
+
+    // 双色花映射：双色花名 -> 拆分的单色花名数组
+    // 只包含至少一种颜色是珍稀花的双色花
+    const DUAL_COLOR_MAP = {
+      // 蔷薇系（两种颜色都是珍稀花）
+      "粉白蔷薇": ["粉色蔷薇", "白色蔷薇"],
+      "红白蔷薇": ["红色蔷薇", "白色蔷薇"],
+      "黄白蔷薇": ["黄色蔷薇", "白色蔷薇"],
+      "红粉蔷薇": ["红色蔷薇", "粉色蔷薇"],
+      "红黄蔷薇": ["红色蔷薇", "黄色蔷薇"],
+      "粉黄蔷薇": ["粉色蔷薇", "黄色蔷薇"],
+      // 夕雾系（两种颜色都是珍稀花）
+      "粉蓝夕雾": ["粉色夕雾", "蓝色夕雾"],
+      "粉白夕雾": ["粉色夕雾", "白色夕雾"],
+      "粉紫夕雾": ["粉色夕雾", "紫色夕雾"],
+      "蓝白夕雾": ["蓝色夕雾", "白色夕雾"],
+      "蓝紫夕雾": ["蓝色夕雾", "紫色夕雾"],
+      "白紫夕雾": ["白色夕雾", "紫色夕雾"],
+      // 罗布麻系（只有黑色是珍稀花）
+      "紫黑罗布麻": ["紫色罗布麻", "黑色罗布麻"],
+      "粉黑罗布麻": ["粉色罗布麻", "黑色罗布麻"],
+      "黑紫罗布麻": ["黑色罗布麻", "紫色罗布麻"],
+      "黑粉罗布麻": ["黑色罗布麻", "粉色罗布麻"],
+      // 玫瑰系（只有黑色是珍稀花）
+      "蓝黑玫瑰": ["蓝色玫瑰", "黑色玫瑰"],
+      "红黑玫瑰": ["红色玫瑰", "黑色玫瑰"],
+      "白黑玫瑰": ["白色玫瑰", "黑色玫瑰"],
+      "黑蓝玫瑰": ["黑色玫瑰", "蓝色玫瑰"],
+      "黑红玫瑰": ["黑色玫瑰", "红色玫瑰"],
+      "黑白玫瑰": ["黑色玫瑰", "白色玫瑰"],
+      // 茑萝系（只有黑色是珍稀花）
+      "红黑茑萝": ["红色茑萝", "黑色茑萝"],
+      "白黑茑萝": ["白色茑萝", "黑色茑萝"],
+      "黑红茑萝": ["黑色茑萝", "红色茑萝"],
+      "黑白茑萝": ["黑色茑萝", "白色茑萝"],
+      "黑茑萝花": ["黑色茑萝花"],  // 单色，但名字有"黑"
+      // 郁金香系（只有黑色是珍稀花）
+      "粉黑郁金香": ["粉色郁金香", "黑色郁金香"],
+      "白黑郁金香": ["白色郁金香", "黑色郁金香"],
+      "黄黑郁金香": ["黄色郁金香", "黑色郁金香"],
+      "黑粉郁金香": ["黑色郁金香", "粉色郁金香"],
+      "黑白郁金香": ["黑色郁金香", "白色郁金香"],
+      "黑黄郁金香": ["黑色郁金香", "黄色郁金香"],
+      // 梅花系（只有绿色是珍稀花）
+      "红绿梅花": ["红色梅花", "绿色梅花"],
+      "白绿梅花": ["白色梅花", "绿色梅花"],
+      "粉绿梅花": ["粉色梅花", "绿色梅花"],
+      "绿红梅花": ["绿色梅花", "红色梅花"],
+      "绿白梅花": ["绿色梅花", "白色梅花"],
+      "绿粉梅花": ["绿色梅花", "粉色梅花"],
+      // 百合系（只有紫色是珍稀花）
+      "白紫百合": ["白色百合", "紫色百合"],
+      "粉紫百合": ["粉色百合", "紫色百合"],
+      "黄紫百合": ["黄色百合", "紫色百合"],
+      "紫白百合": ["紫色百合", "白色百合"],
+      "紫粉百合": ["紫色百合", "粉色百合"],
+      "紫黄百合": ["紫色百合", "黄色百合"],
+      // 龙胆系（只有紫色是珍稀花）
+      "粉紫龙胆": ["粉色龙胆", "紫色龙胆"],
+      "蓝紫龙胆": ["蓝色龙胆", "紫色龙胆"],
+      "紫粉龙胆": ["紫色龙胆", "粉色龙胆"],
+      "紫蓝龙胆": ["紫色龙胆", "蓝色龙胆"],
+      // 昙花系（只有紫色是珍稀花）
+      "白紫昙花": ["白色昙花", "紫色昙花"],
+      "黄紫昙花": ["黄色昙花", "紫色昙花"],
+      "紫白昙花": ["紫色昙花", "白色昙花"],
+      "紫黄昙花": ["紫色昙花", "黄色昙花"],
+      // 薰衣草系（只有紫色是珍稀花）
+      "粉紫薰衣草": ["粉色薰衣草", "紫色薰衣草"],
+      "蓝紫薰衣草": ["蓝色薰衣草", "紫色薰衣草"],
+      "白紫薰衣草": ["白色薰衣草", "紫色薰衣草"],
+      "紫粉薰衣草": ["紫色薰衣草", "粉色薰衣草"],
+      "紫蓝薰衣草": ["紫色薰衣草", "蓝色薰衣草"],
+      "紫白薰衣草": ["紫色薰衣草", "白色薰衣草"],
+      // 胭脂花系（只有紫色是珍稀花）
+      "红紫胭脂花": ["红色胭脂花", "紫色胭脂花"],
+      "白紫胭脂花": ["白色胭脂花", "紫色胭脂花"],
+      "黄紫胭脂花": ["黄色胭脂花", "紫色胭脂花"],
+      "紫红胭脂花": ["紫色胭脂花", "红色胭脂花"],
+      "紫白胭脂花": ["紫色胭脂花", "白色胭脂花"],
+      "紫黄胭脂花": ["紫色胭脂花", "黄色胭脂花"],
+      // 夜来香系（只有紫色是珍稀花）
+      "白紫夜来香": ["白色夜来香", "紫色夜来香"],
+      "紫白夜来香": ["紫色夜来香", "白色夜来香"],
+      // 鸢尾系（只有紫色是珍稀花）
+      "蓝紫鸢尾": ["蓝色鸢尾", "紫色鸢尾"],
+      "白紫鸢尾": ["白色鸢尾", "紫色鸢尾"],
+      "黄紫鸢尾": ["黄色鸢尾", "紫色鸢尾"],
+      "紫蓝鸢尾": ["紫色鸢尾", "蓝色鸢尾"],
+      "紫白鸢尾": ["紫色鸢尾", "白色鸢尾"],
+      "紫黄鸢尾": ["紫色鸢尾", "黄色鸢尾"],
+      // 彩虹菊系（七彩彩虹菊是珍稀花，其他颜色是普通花）
+      "七彩红彩虹菊": ["七彩彩虹菊"],
+      "七彩黄彩虹菊": ["七彩彩虹菊"],
+      "七彩白彩虹菊": ["七彩彩虹菊"],
+      "红七彩彩虹菊": ["七彩彩虹菊"],
+      "黄七彩彩虹菊": ["七彩彩虹菊"],
+      "白七彩彩虹菊": ["七彩彩虹菊"],
+    };
+
+    // 判断是否是双色花（支持颜色顺序不同）
+    function getDualColorTargets(flowerName) {
+      // 直接匹配
+      if (DUAL_COLOR_MAP[flowerName]) {
+        return DUAL_COLOR_MAP[flowerName];
+      }
+      // 尝试反转颜色顺序匹配（如"紫黑罗布麻" -> 找"黑紫罗布麻"）
+      // 提取花系
+      const flowerTypes = ["蔷薇", "夕雾", "罗布麻", "玫瑰", "茑萝", "郁金香", "梅花", "百合", "龙胆", "昙花", "薰衣草", "胭脂花", "夜来香", "鸢尾", "彩虹菊"];
+      for (const type of flowerTypes) {
+        if (flowerName.includes(type)) {
+          // 尝试所有可能的键
+          for (const [key, targets] of Object.entries(DUAL_COLOR_MAP)) {
+            if (key.includes(type) && flowerName.includes(type)) {
+              // 检查颜色是否相同（顺序可能不同）
+              const keyColors = extractColorsFromName(key);
+              const nameColors = extractColorsFromName(flowerName);
+              if (arraysEqual(keyColors.sort(), nameColors.sort())) {
+                return targets;
+              }
+            }
+          }
+        }
+      }
+      return null;
+    }
+
+    // 从花名中提取颜色词
+    function extractColorsFromName(name) {
+      const colorPatterns = [
+        { keywords: ["七彩"], color: "七彩" },
+        { keywords: ["黑色", "黑"], color: "黑色" },
+        { keywords: ["白色", "白"], color: "白色" },
+        { keywords: ["红色", "红"], color: "红色" },
+        { keywords: ["黄色", "黄"], color: "黄色" },
+        { keywords: ["蓝色", "蓝"], color: "蓝色" },
+        { keywords: ["绿色", "绿"], color: "绿色" },
+        { keywords: ["紫色", "紫"], color: "紫色" },
+        { keywords: ["粉色", "粉"], color: "粉色" },
+      ];
+      const found = [];
+      let remaining = name;
+      for (const { keywords, color } of colorPatterns) {
+        for (const kw of keywords) {
+          if (remaining.includes(kw)) {
+            found.push(color);
+            remaining = remaining.replace(kw, "");
+            break;
+          }
+        }
+      }
+      return found;
+    }
+
+    function arraysEqual(a, b) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+      }
+      return true;
+    }
+
+    // 判断是否是双色花
+    function isDualColorFlower(name) {
+      return getDualColorTargets(name) !== null;
+    }
+
+    // 获取双色花中需要统计的珍稀目标
+    function getRareTargetsFromDual(dualName) {
+      const targets = getDualColorTargets(dualName);
+      if (!targets) return [];
+      // 只返回在珍稀花列表中的目标
+      return targets.filter(t => RARE_FLOWERS.includes(t));
+    }
+
+    const THEMES = {
+      dark: {
+        bg: "#19191D",
+        card: "#131218",
+        cardWilted: "#160808",
+        cardUrgent: "#14100a",
+        border: "#24202e",
+        borderWilted: "#4a1010",
+        borderUrgent: "#3a2800",
+        accent: "#b48fd0",
+        accentDim: "#6a4080",
+        alive: "#72c472",
+        urgent: "#e8a040",
+        wilted: "#e05050",
+        unknown: "#666",
+        text: "#e0d8ec",
+        muted: "#7a7088",
+        inputBg: "#08080c",
+        modalBg: "#18141f",
+        rowAlive: "#0e1a0e",
+        rowUrgent: "#1a1200",
+        rowWilted: "#1a0808",
+        rowUnknown: "#0f0f12",
+      },
+      light: {
+        bg: "#f5f5f7",
+        card: "#ffffff",
+        cardWilted: "#fff0f0",
+        cardUrgent: "#fff8e8",
+        border: "#e0e0e5",
+        borderWilted: "#e8a0a0",
+        borderUrgent: "#e8d080",
+        accent: "#7b4fa0",
+        accentDim: "#9a7ab8",
+        alive: "#2a9d2a",
+        urgent: "#c07010",
+        wilted: "#c02020",
+        unknown: "#888",
+        text: "#1a1a1a",
+        muted: "#666",
+        inputBg: "#f0f0f2",
+        modalBg: "#ffffff",
+        rowAlive: "#f0f8f0",
+        rowUrgent: "#fff8e8",
+        rowWilted: "#fff0f0",
+        rowUnknown: "#f5f5f7",
+      }
+    };
+
+    function uid() { return Math.random().toString(36).slice(2, 9); }
+
+    // ========== 【修改】增强的 parseInput，支持 # 标记的新格式 ==========
+    // forceFormat2: 由格式2输入框传入，强制按"花名+数量 小时 分钟 / 账号ID单独一行"解析，无需 # 号
+    function parseInput(text, forceFormat2 = false) {
+      const useNewFormat = forceFormat2 || text.includes('#');
+
+      const lines = text.trim().split("\n").filter(l => l.trim());
+      const out = [];
+      let currentAccountFlowers = [];
+      let currentAccountId = null;
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        const parts = line.split(/\s+/);
+
+        // ========== 新格式：输入框内有 # 号 ==========
+        if (useNewFormat) {
+          if (line === '#') continue;
+
+          const isAccountLine = parts.length === 1 && /^\d+$/.test(parts[0]);
+
+          if (isAccountLine) {
+            if (currentAccountFlowers.length > 0) {
+              out.push({
+                id: uid(),
+                accountId: parts[0],
+                flowers: currentAccountFlowers,
+              });
+              currentAccountFlowers = [];
+            }
+            continue;
+          }
+
+          if (parts.length >= 3) {
+            const last = parts[parts.length - 1];
+            const secondLast = parts[parts.length - 2];
+
+            if (/^\d+$/.test(last) && /^\d+$/.test(secondLast)) {
+              const flowerPart = parts[parts.length - 3];
+              const m = flowerPart.match(/^(\d+)?(.+?)(\d+)$/);
+
+              if (m) {
+                const prefix = m[1] ? m[1] : "";
+                const name = prefix + m[2];
+                const count = parseInt(m[3]);
+                const remainingHours = parseInt(secondLast);
+                const remainingMinutes = parseInt(last);
+
+                const durationMs = name.includes('昙花') ? EPHEMERAL_MS : DEFAULT_MS;
+                const remainingMs = (remainingHours * 3600 + remainingMinutes * 60) * 1000;
+                const revivalTime = Date.now() - (durationMs - remainingMs);
+
+                currentAccountFlowers.push({
+                  id: uid(),
+                  name: name,
+                  count: count,
+                  revivalTime: revivalTime,
+                  durationMs: durationMs,
+                });
+                continue;
+              }
+            }
+          }
+          continue;
+        }
+
+        // ========== 旧格式（无 # 号）==========
+        const lastPart = parts[parts.length - 1];
+        if (/^\d+$/.test(lastPart)) {
+          const flowers = [];
+          for (let j = 0; j < parts.length - 1; j++) {
+            const p = parts[j];
+            const m = p.match(/^(.+?)(\d+)$/);
+            if (m) {
+              flowers.push({
+                id: uid(),
+                name: m[1],
+                count: parseInt(m[2]),
+                revivalTime: null,
+                durationMs: DEFAULT_MS,
+              });
+            }
+          }
+
+          if (flowers.length > 0) {
+            out.push({
+              id: uid(),
+              accountId: lastPart,
+              flowers: flowers,
+            });
+          }
+        }
+      }
+
+      if (useNewFormat && currentAccountFlowers.length > 0) {
+        const lastLine = lines[lines.length - 1].trim();
+        const accountId = /^\d+$/.test(lastLine) ? lastLine : 'unknown';
+        out.push({
+          id: uid(),
+          accountId: accountId,
+          flowers: currentAccountFlowers,
+        });
+      }
+
+      return out;
+    }
+
+    function remMs(f) {
+      if (f.revivalTime === null) return null;
+      return f.revivalTime + f.durationMs - Date.now();
+    }
+
+    function fmtRem(ms) {
+      if (ms === null) return "未记录";
+      const abs = Math.abs(ms);
+      const d = Math.floor(abs / 86400000);
+      const h = Math.floor((abs % 86400000) / 3600000);
+      const m = Math.floor((abs % 3600000) / 60000);
+      const s = ms < 0 ? "-" : "";
+      if (d > 0) return `${s}${d}天${h}h${m}m`;
+      if (h > 0) return `${s}${h}h${m}m`;
+      return `${s}${m}分钟`;
+    }
+
+    function fmtDate(ts) {
+      if (!ts) return "—";
+      return new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function toDatetimeLocal(ts) {
+      if (!ts) return "";
+      const d = new Date(ts - new Date().getTimezoneOffset() * 60000);
+      return d.toISOString().slice(0, 16);
+    }
+
+    function status(f) {
+      const r = remMs(f);
+      if (r === null) return "unknown";
+      if (r <= 0) return "wilted";
+      if (r < 24 * 3600000) return "urgent";
+      return "alive";
+    }
+
+    const pill = (color) => ({
+      display: "inline-block", borderRadius: 12,
+      padding: "2px 10px", fontSize: 12, fontWeight: 700,
+      background: color + "20", color,
+      border: `1px solid ${color}40`,
+    });
+
+    const btn = (color, bg = "transparent") => ({
+      background: bg, color, border: `1px solid ${color}50`,
+      borderRadius: 6, padding: "6px 14px", fontSize: 14,
+      cursor: "pointer", fontFamily: "inherit", lineHeight: 1.4,
+      transition: "opacity .15s",
+    });
+
+    const tinyBtn = (color) => ({
+      background: "transparent", color,
+      border: `1px solid ${color}40`,
+      borderRadius: 5, padding: "3px 10px", fontSize: 13,
+      cursor: "pointer", fontFamily: "inherit",
+    });
+
+    // 分享码输入 / 输出框
+    const codeBox = (C, isDark) => ({
+      width: "100%", boxSizing: "border-box",
+      background: C.inputBg,
+      border: `1px solid ${C.border}`,
+      borderRadius: 8, padding: "8px 10px",
+      color: C.text, fontSize: 11,
+      fontFamily: "monospace",
+      resize: "vertical", outline: "none",
+      lineHeight: 1.5, wordBreak: "break-all",
+    });
+
+    function ThemeToggle({ theme, setTheme }) {
+      const isDark = theme === "dark";
+      return (
+        <button
+          onClick={() => {
+            const next = isDark ? "light" : "dark";
+            setTheme(next);
+            localStorage.setItem(THEME_KEY, next);
+          }}
+          style={{
+            background: "transparent",
+            border: `1px solid ${isDark ? "#6a4080" : "#ccc"}`,
+            borderRadius: 20,
+            padding: "5px 14px",
+            fontSize: 13,
+            color: isDark ? "#b48fd0" : "#666",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+          title={isDark ? "切换到浅色模式" : "切换到深色模式"}
+        >
+          {isDark ? "🌙 深色" : "☀️ 浅色"}
+        </button>
+      );
+    }
+
+    // ========== 辅助函数：计算复活时间和剩余时长的联动 ==========
+    // 给定剩余时长(小时)，计算复活时间 = 当前时间 + 剩余时长 - 总时长
+    function calcRevivalTimeFromRemaining(remainingHours, totalDurationMs) {
+      const now = Date.now();
+      const remainingMs = remainingHours * 3600000;
+      // 复活时间 = 枯萎时间 - 总时长 = (当前时间 + 剩余时长) - 总时长
+      const revivalTime = now + remainingMs - totalDurationMs;
+      return revivalTime;
+    }
+
+    // 给定复活时间，计算剩余时长(小时) = (复活时间 + 总时长) - 当前时间
+    function calcRemainingFromRevivalTime(revivalTimeMs, totalDurationMs) {
+      const now = Date.now();
+      const remainingMs = (revivalTimeMs + totalDurationMs) - now;
+      return remainingMs / 3600000;
+    }
+
+    function AnimatedNumber({ value, color }) {
+      const [displayValue, setDisplayValue] = useState(value);
+      const [isFlipping, setIsFlipping] = useState(false);
+
+      useEffect(() => {
+        if (value !== displayValue) {
+          setIsFlipping(true);
+          const timer = setTimeout(() => {
+            setDisplayValue(value);
+            setIsFlipping(false);
+          }, 150);
+          return () => clearTimeout(timer);
+        }
+      }, [value]);
+
+      return (
+        <span style={{
+          display: "inline-block",
+          color,
+          transform: isFlipping ? "rotateX(-90deg)" : "rotateX(0)",
+          opacity: isFlipping ? 0.5 : 1,
+          transition: "transform 0.15s ease-in, opacity 0.15s",
+          transformOrigin: "center bottom",
+          fontVariantNumeric: "tabular-nums",
+        }}>
+          {displayValue}
+        </span>
+      );
+    }
+
+    function App() {
+      const [accounts, setAccounts] = useState([]);
+      const [loaded, setLoaded] = useState(false);
+      const [showImport, setShowImport] = useState(false);
+      const [importText, setImportText] = useState("");
+      const [importText2, setImportText2] = useState("");
+      const [importError, setImportError] = useState("");
+
+      // ========== 备份面板状态 ==========
+      const [showBackup, setShowBackup] = useState(false);
+      const [shareCode, setShareCode] = useState("");
+      const [shareScope, setShareScope] = useState("full"); // full | accounts | prefs
+      const [sharePaste, setSharePaste] = useState("");
+      const [backupMsg, setBackupMsg] = useState(null);        // { type: 'ok' | 'err', text }
+      const [pendingRestore, setPendingRestore] = useState(null); // { backup, source }
+      const [snapshots, setSnapshots] = useState([]);
+      const [, setTick] = useState(0);
+      const [modal, setModal] = useState(null);
+      const [confirmDel, setConfirmDel] = useState(null);
+      const [copiedId, setCopiedId] = useState(null);
+      const [addModal, setAddModal] = useState(null);
+      const [editingFlower, setEditingFlower] = useState(null);
+      const [searchText, setSearchText] = useState("");
+      const [accountReminders, setAccountReminders] = useState(() => {
+        const saved = localStorage.getItem(REMINDER_KEY);
+        return saved ? new Set(JSON.parse(saved)) : new Set();
+      });
+      const [showImportHelp, setShowImportHelp] = useState(false);
+
+      // ========== 折叠账号状态 ==========
+      const [collapsedAccounts, setCollapsedAccounts] = useState(() => {
+        const saved = localStorage.getItem(COLLAPSED_KEY);
+        return saved ? new Set(JSON.parse(saved)) : new Set();
+      });
+
+      // ========== 花朵列表展开状态（用于种类超过8种的账号） ==========
+      // 不持久化：刷新后始终重置为收起状态
+      const [expandedAccounts, setExpandedAccounts] = useState(() => new Set());
+
+      const [showCollapsed, setShowCollapsed] = useState(false); // 搜索"//"时显示
+      // ========== 置顶账号状态（持久化） ==========
+      const [pinnedAccountId, setPinnedAccountId] = useState(() => readJSON(PINNED_KEY, null));
+
+      // ========== 回到顶部按钮状态 ==========
+      const [showBackToTop, setShowBackToTop] = useState(false);
+
+      // ========== 过渡动画状态 ==========
+      const [calendarVisible, setCalendarVisible] = useState(false);
+      const [calendarAnimating, setCalendarAnimating] = useState(false);
+      const [addModalVisible, setAddModalVisible] = useState(false);
+      const [addModalAnimating, setAddModalAnimating] = useState(false);
+      const [editModalVisible, setEditModalVisible] = useState(false);
+      const [editModalAnimating, setEditModalAnimating] = useState(false);
+
+
+      // ========== 日历相关状态 ==========
+      const [showCalendar, setShowCalendar] = useState(false);
+      const [todayRevived, setTodayRevived] = useState(() => {
+        const saved = localStorage.getItem(TODAY_KEY);
+        const today = new Date().toDateString();
+        if (saved) {
+          const { date, count } = JSON.parse(saved);
+          if (date === today) return count;
+        }
+        return 0;
+      });
+
+      const [revivedTodayIds, setRevivedTodayIds] = useState(() => {
+        const saved = localStorage.getItem(TODAY_IDS_KEY);
+        const today = new Date().toDateString();
+        if (saved) {
+          const { date, ids } = JSON.parse(saved);
+          if (date === today) return new Set(ids);
+        }
+        return new Set();
+      });
+
+      const [theme, setTheme] = useState(() => {
+        const saved = localStorage.getItem(THEME_KEY);
+        if (saved) return saved;
+        return "dark";
+      });
+
+      // ========== 收集进度状态 ==========
+      const [collectionGoals, setCollectionGoals] = useState(() => {
+        try {
+          const saved = localStorage.getItem(COLLECTION_KEY);
+          if (saved) return JSON.parse(saved);
+        } catch { }
+        return {};
+      });
+      const [showCollection, setShowCollection] = useState(false);
+      const [collectionVisible, setCollectionVisible] = useState(false);
+      const [collectionAnimating, setCollectionAnimating] = useState(false);
+      const [collectionAddModal, setCollectionAddModal] = useState(null);
+      const [collectionSearch, setCollectionSearch] = useState("");
+      const [collectionSort, setCollectionSort] = useState(() => {
+        return localStorage.getItem(SORT_KEY) || "progress";
+      }); // progress | progressDesc | name | nameDesc | earliest | latest
+      const [dualColorModal, setDualColorModal] = useState(null);
+
+      // ========== Toast 通知状态 ==========
+      const [toasts, setToasts] = useState([]);
+      const titleFlashRef = React.useRef(null);
+      const originalTitle = "花园复活追踪";
+
+      function addToast(title, body) {
+        const id = uid();
+        setToasts(prev => [...prev, { id, title, body }]);
+        setTimeout(() => {
+          setToasts(prev => prev.filter(t => t.id !== id));
+        }, 8000); // 8秒后自动消失
+      }
+
+      function playBeep() {
+        try {
+          const ctx = getAudioCtx();
+          if (!ctx) return;
+          // 第一声
+          const o1 = ctx.createOscillator();
+          const g1 = ctx.createGain();
+          o1.connect(g1); g1.connect(ctx.destination);
+          o1.frequency.value = 880;
+          o1.type = "sine";
+          g1.gain.setValueAtTime(0.3, ctx.currentTime);
+          g1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+          o1.start(ctx.currentTime); o1.stop(ctx.currentTime + 0.4);
+          // 第二声（稍高）
+          const o2 = ctx.createOscillator();
+          const g2 = ctx.createGain();
+          o2.connect(g2); g2.connect(ctx.destination);
+          o2.frequency.value = 1100;
+          o2.type = "sine";
+          g2.gain.setValueAtTime(0.25, ctx.currentTime + 0.45);
+          g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.85);
+          o2.start(ctx.currentTime + 0.45); o2.stop(ctx.currentTime + 0.85);
+        } catch(e) {}
+      }
+
+      // ========== 枯萎提示音（更低沉急促，三声下降） ==========
+      function playWiltedBeep() {
+        try {
+          const ctx = getAudioCtx();
+          if (!ctx) return;
+          // 第一声（低沉）
+          const o1 = ctx.createOscillator();
+          const g1 = ctx.createGain();
+          o1.connect(g1); g1.connect(ctx.destination);
+          o1.frequency.value = 440;
+          o1.type = "sine";
+          g1.gain.setValueAtTime(0.35, ctx.currentTime);
+          g1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+          o1.start(ctx.currentTime); o1.stop(ctx.currentTime + 0.3);
+          // 第二声（更低）
+          const o2 = ctx.createOscillator();
+          const g2 = ctx.createGain();
+          o2.connect(g2); g2.connect(ctx.destination);
+          o2.frequency.value = 330;
+          o2.type = "sine";
+          g2.gain.setValueAtTime(0.3, ctx.currentTime + 0.35);
+          g2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+          o2.start(ctx.currentTime + 0.35); o2.stop(ctx.currentTime + 0.6);
+          // 第三声（最低，短促）
+          const o3 = ctx.createOscillator();
+          const g3 = ctx.createGain();
+          o3.connect(g3); g3.connect(ctx.destination);
+          o3.frequency.value = 220;
+          o3.type = "sine";
+          g3.gain.setValueAtTime(0.4, ctx.currentTime + 0.65);
+          g3.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.9);
+          o3.start(ctx.currentTime + 0.65); o3.stop(ctx.currentTime + 0.9);
+        } catch(e) {}
+      }
+
+      function flashTitle(message) {
+        if (titleFlashRef.current) clearInterval(titleFlashRef.current);
+        let isAlt = false;
+        titleFlashRef.current = setInterval(() => {
+          document.title = isAlt ? originalTitle : message;
+          isAlt = !isAlt;
+        }, 800);
+        // 30秒后停止闪烁
+        setTimeout(() => {
+          clearInterval(titleFlashRef.current);
+          document.title = originalTitle;
+        }, 30000);
+      }
+
+      const C = THEMES[theme];
+      const isDark = theme === "dark";
+
+      useEffect(() => {
+        const handleScroll = () => {
+          setShowBackToTop(window.scrollY > 300);
+        };
+        window.addEventListener('scroll', handleScroll);
+        return () => window.removeEventListener('scroll', handleScroll);
+      }, []);
+
+      useEffect(() => {
+        document.body.style.background = C.bg;
+        document.body.style.color = C.text;
+      }, [theme]);
+
+      useEffect(() => {
+        try {
+          const r = localStorage.getItem(STORAGE_KEY);
+          if (r) setAccounts(JSON.parse(r));
+        } catch { }
+        setLoaded(true);
+        unlockAudioOnce();
+      }, []);
+
+      // 主数据持久化 + 自动快照（每次改动前先留一份，滚动保留最近 3 份）
+      const lastAccountsJsonRef = React.useRef(null);
+      useEffect(() => {
+        if (!loaded) return;
+        const json = JSON.stringify(accounts);
+        try { localStorage.setItem(STORAGE_KEY, json); } catch { }
+        const prev = lastAccountsJsonRef.current;
+        if (prev !== null && prev !== json && pushSnapshot(prev)) loadSnapshots();
+        lastAccountsJsonRef.current = json;
+      }, [accounts, loaded]);
+
+      // ========== 置顶账号持久化 ==========
+      useEffect(() => {
+        writeJSON(PINNED_KEY, pinnedAccountId);
+      }, [pinnedAccountId]);
+
+      // ========== 收集进度数据持久化 ==========
+      useEffect(() => {
+        try {
+          localStorage.setItem(COLLECTION_KEY, JSON.stringify(collectionGoals));
+        } catch { }
+      }, [collectionGoals]);
+
+      // ========== 收集进度排序持久化 ==========
+      useEffect(() => {
+        try {
+          localStorage.setItem(SORT_KEY, collectionSort);
+        } catch { }
+      }, [collectionSort]);
+
+      // ========== 收集面板过渡动画 ==========
+      useEffect(() => {
+        if (showCollection) {
+          setCollectionVisible(true);
+          requestAnimationFrame(() => setCollectionAnimating(true));
+        } else {
+          setCollectionAnimating(false);
+          const timer = setTimeout(() => setCollectionVisible(false), 300);
+          return () => clearTimeout(timer);
+        }
+      }, [showCollection]);
+
+      // ========== 加载完成后清理不存在的账号的提醒记录 ==========
+      useEffect(() => {
+        if (!loaded || accounts.length === 0) return;
+        const validIds = new Set(accounts.map(a => a.accountId));
+        setAccountReminders(prev => {
+          const newSet = new Set([...prev].filter(id => validIds.has(id)));
+          if (newSet.size !== prev.size) {
+            localStorage.setItem(REMINDER_KEY, JSON.stringify(Array.from(newSet)));
+          }
+          return newSet;
+        });
+      }, [loaded, accounts]);
+
+      useEffect(() => {
+        if (!loaded) return;
+
+        // 初始化状态记录
+        if (!window.__reminderState) window.__reminderState = {};
+
+        // 清除旧的轮询
+        if (window.__reminderInterval) {
+          clearInterval(window.__reminderInterval);
+          window.__reminderInterval = null;
+        }
+
+        // 如果没有任何账号开启提醒，不需要启动轮询
+        if (accountReminders.size === 0) return;
+
+        // 启动轮询：每 10 秒检查一次
+        window.__reminderInterval = setInterval(() => {
+          const now = Date.now();
+
+          accountReminders.forEach(accountId => {
+            const account = accounts.find(a => a.accountId === accountId);
+            if (!account) return;
+
+            if (!window.__reminderState[accountId]) window.__reminderState[accountId] = {};
+
+            account.flowers.forEach(f => {
+              if (f.revivalTime === null) return;
+
+              const wiltTime = f.revivalTime + f.durationMs;
+              const timeUntilWilt = wiltTime - now;
+              const prevState = window.__reminderState[accountId][f.id];
+
+              // 初始化状态（第一次看到这个花）
+              if (prevState === undefined) {
+                window.__reminderState[accountId][f.id] = timeUntilWilt;
+                return;
+              }
+
+              // 情况1：从"活着"变成"枯萎"（刚好枯萎）
+              if (prevState > 0 && timeUntilWilt <= 0) {
+                const msg = `账号 #${accountId} 的 ${f.name}×${f.count} 已经枯萎了！`;
+                addToast("🥀 花朵已枯萎！", msg);
+                playWiltedBeep();
+                flashTitle("🥀 已经枯萎了！");
+              }
+
+              // 情况2：从"还有2分钟以上"变成"不到2分钟"（即将枯萎）
+              if (prevState > 2 * 60000 && timeUntilWilt > 0 && timeUntilWilt <= 2 * 60000) {
+                const msg = `账号 #${accountId} 的 ${f.name}×${f.count} 还有 2 分钟就枯萎了！`;
+                addToast("🥀 花朵即将枯萎！", msg);
+                playBeep();
+                flashTitle("🥀 快去复活！");
+              }
+
+              // 更新状态
+              window.__reminderState[accountId][f.id] = timeUntilWilt;
+            });
+          });
+        }, 10000); // 每 10 秒检查一次
+
+        return () => {
+          if (window.__reminderInterval) {
+            clearInterval(window.__reminderInterval);
+            window.__reminderInterval = null;
+          }
+        };
+      }, [loaded, accounts, accountReminders]);
+
+      useEffect(() => {
+        const t = setInterval(() => setTick(n => n + 1), 20000);
+        return () => clearInterval(t);
+      }, []);
+
+      useEffect(() => {
+        const checkDayChange = () => {
+          const saved = localStorage.getItem(TODAY_KEY);
+          const today = new Date().toDateString();
+          if (saved) {
+            const { date } = JSON.parse(saved);
+            if (date !== today) {
+              setTodayRevived(0);
+              localStorage.setItem(TODAY_KEY, JSON.stringify({ date: today, count: 0 }));
+            }
+          }
+        };
+        const interval = setInterval(checkDayChange, 60000);
+        return () => clearInterval(interval);
+      }, []);
+
+      // ========== 日历过渡动画控制 ==========
+      useEffect(() => {
+        if (showCalendar) {
+          setCalendarVisible(true);
+          requestAnimationFrame(() => setCalendarAnimating(true));
+        } else {
+          setCalendarAnimating(false);
+          const timer = setTimeout(() => setCalendarVisible(false), 350);
+          return () => clearTimeout(timer);
+        }
+      }, [showCalendar]);
+
+      // ========== 添加花朵弹窗过渡动画控制 ==========
+      useEffect(() => {
+        if (addModal) {
+          setAddModalVisible(true);
+          requestAnimationFrame(() => setAddModalAnimating(true));
+        } else {
+          setAddModalAnimating(false);
+          const timer = setTimeout(() => setAddModalVisible(false), 250);
+          return () => clearTimeout(timer);
+        }
+      }, [addModal]);
+
+      // ========== 编辑弹窗过渡动画控制 ==========
+      useEffect(() => {
+        if (modal) {
+          setEditModalVisible(true);
+          requestAnimationFrame(() => setEditModalAnimating(true));
+        } else {
+          setEditModalAnimating(false);
+          const timer = setTimeout(() => setEditModalVisible(false), 250);
+          return () => clearTimeout(timer);
+        }
+      }, [modal]);
+
+      useEffect(() => {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Array.from(collapsedAccounts)));
+      }, [collapsedAccounts]);
+
+      // 展开状态不持久化，刷新后默认收起（无需写入 localStorage）
+
+      async function setAccountReminder(accountId) {
+        // 页面内提醒不需要任何权限，直接切换提醒状态
+        doSetAccountReminder(accountId);
+      }
+
+      function doSetAccountReminder(accountId) {
+        const newSet = new Set(accountReminders);
+        if (newSet.has(accountId)) {
+          newSet.delete(accountId);
+          // 清除该账号的状态记录
+          if (window.__reminderState?.[accountId]) {
+            delete window.__reminderState[accountId];
+          }
+        } else {
+          newSet.add(accountId);
+        }
+        setAccountReminders(newSet);
+        localStorage.setItem(REMINDER_KEY, JSON.stringify(Array.from(newSet)));
+      }
+
+      // ========== 备份：导出 ==========
+      function exportData() {
+        const payload = buildBackup();
+        if (!payload.accounts.length) {
+          setBackupMsg({ type: "err", text: "还没有任何账号数据，先添加账号再导出。" });
+          return;
+        }
+        const json = JSON.stringify(payload, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const d = new Date();
+        const p = n => String(n).padStart(2, "0");
+        a.download = `花园复活追踪备份_${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        const goalCount = Object.keys(payload.collectionGoals).length;
+        setBackupMsg({
+          type: "ok",
+          text: `已导出 ${payload.accounts.length} 个账号 · ${goalCount} 个收集目标 · 含提醒/折叠/排序/主题设置。`,
+        });
+      }
+
+      // ========== 备份：从文件读取（只解析，不直接落库） ==========
+      function importData(file) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          let payload = null;
+          try {
+            payload = parseBackup(e.target.result);
+          } catch {
+            setBackupMsg({ type: "err", text: "无法解析该文件，请确认是本工具导出的 JSON 备份。" });
+            return;
+          }
+          if (!payload) {
+            setBackupMsg({ type: "err", text: "这不是「花园复活追踪」的备份文件。" });
+            return;
+          }
+          if (!payload.accounts.length) {
+            setBackupMsg({ type: "err", text: "备份里没有任何账号数据。" });
+            return;
+          }
+          setPendingRestore({ backup: payload, source: "文件" });
+        };
+        reader.readAsText(file);
+      }
+
+      // ========== 备份：应用（覆盖 / 合并 / 只导配置） ==========
+      function applyBackup(payload, mode) {
+        const prefs = payload.prefs || {};
+        const incoming = payload.accounts || [];
+        const snapshotJson = localStorage.getItem(STORAGE_KEY);
+
+        // 先算出最终账号集，后面的偏好设置要按它过滤，避免留下指向不存在账号的键
+        let finalAccounts = accounts;
+        if (mode !== "prefsOnly") {
+          finalAccounts = mode === "merge"
+            ? mergeAccountList(accounts, incoming)
+            : incoming.map(a => ({
+              id: a.id || uid(),
+              accountId: a.accountId,
+              flowers: (a.flowers || []).map(f => ({ ...f, id: f.id || uid() })),
+            }));
+          if (snapshotJson) {
+            pushSnapshot(snapshotJson);
+            loadSnapshots();
+          }
+          setAccounts(finalAccounts);
+          if (payload.collectionGoals && Object.keys(payload.collectionGoals).length) {
+            setCollectionGoals(prev => (mode === "merge"
+              ? mergeGoals(prev, payload.collectionGoals)
+              : stripSelected(payload.collectionGoals)));
+          }
+        }
+
+        const validIds = new Set(finalAccounts.map(a => a.accountId));
+
+        // 偏好设置：合并模式取并集，覆盖 / 只导配置直接以备份为准
+        if (prefs.theme === "dark" || prefs.theme === "light") {
+          setTheme(prefs.theme);
+          localStorage.setItem(THEME_KEY, prefs.theme);
+        }
+        if (typeof prefs.collectionSort === "string" && prefs.collectionSort) {
+          setCollectionSort(prefs.collectionSort);
+        }
+        setAccountReminders(prev => {
+          const base = mode === "merge" ? prev : new Set();
+          const next = new Set([...base, ...(prefs.accountReminders || [])].filter(id => validIds.has(id)));
+          writeJSON(REMINDER_KEY, Array.from(next));
+          return next;
+        });
+        setCollapsedAccounts(prev => {
+          const base = mode === "merge" ? prev : new Set();
+          return new Set([...base, ...(prefs.collapsedAccounts || [])].filter(id => validIds.has(id)));
+        });
+        if (prefs.pinnedAccount && validIds.has(prefs.pinnedAccount)) {
+          setPinnedAccountId(prefs.pinnedAccount);
+        } else if (mode !== "merge") {
+          setPinnedAccountId(null);
+        }
+
+        const modeText = mode === "merge" ? "合并导入" : mode === "prefsOnly" ? "仅导入设置" : "覆盖导入";
+        const source = pendingRestore ? pendingRestore.source : "备份";
+        setPendingRestore(null);
+        setBackupMsg({
+          type: "ok",
+          text: `${modeText}完成（来自${source}）：当前 ${finalAccounts.length} 个账号。`,
+        });
+      }
+
+      // ========== 备份：分享码 ==========
+      const SHARE_SCOPES = [
+        { id: "full", label: "全量", hint: "账号 + 收集 + 设置" },
+        { id: "accounts", label: "仅账号", hint: "只带账号数据，码最短" },
+        { id: "prefs", label: "仅设置", hint: "主题 / 排序 / 提醒 / 折叠 / 置顶" },
+      ];
+      function shareScopeLabel(id) {
+        return (SHARE_SCOPES.find(s => s.id === id) || SHARE_SCOPES[0]).label;
+      }
+      function generateShareCode() {
+        const payload = buildBackup(shareScope);
+        if (shareScope !== "prefs" && !payload.accounts.length) {
+          setBackupMsg({ type: "err", text: "还没有账号数据可以生成分享码，可切换为「仅设置」。" });
+          return;
+        }
+        const code = encodeShare(payload);
+        if (!code) {
+          setBackupMsg({ type: "err", text: "生成失败，请刷新页面后重试。" });
+          return;
+        }
+        setShareCode(code);
+        setBackupMsg({
+          type: "ok",
+          text: `分享码已生成（${shareScopeLabel(shareScope)} · ${code.length} 字符）${window.LZString ? "" : " · 压缩库未加载，码较长但不影响使用"}，复制到另一台设备粘贴即可。`,
+        });
+      }
+
+      function importShareCode() {
+        const text = sharePaste.trim();
+        if (!text) {
+          setBackupMsg({ type: "err", text: "请先粘贴分享码。" });
+          return;
+        }
+        const decoded = decodeShare(text);
+        if (!decoded) {
+          setBackupMsg({ type: "err", text: "分享码无法识别，请确认复制完整（不要漏掉结尾）。" });
+          return;
+        }
+        let payload = null;
+        try { payload = parseBackup(decoded); } catch { payload = null; }
+        const hasAccounts = payload && payload.accounts.length > 0;
+        const hasPrefs = payload && (Object.keys(payload.prefs || {}).length > 0 || Object.keys(payload.collectionGoals || {}).length > 0);
+        if (!payload || (!hasAccounts && !hasPrefs)) {
+          setBackupMsg({ type: "err", text: "分享码内容不完整或不是本工具的分享码。" });
+          return;
+        }
+        setPendingRestore({ backup: payload, source: "分享码" });
+      }
+
+      // ========== 备份：自动快照 ==========
+      function loadSnapshots() {
+        const list = readJSON(SNAPSHOT_KEY, []);
+        setSnapshots(Array.isArray(list) ? list : []);
+      }
+
+      function restoreSnapshot(snap) {
+        if (!snap || !snap.data) return;
+        try {
+          const parsed = JSON.parse(snap.data);
+          if (!Array.isArray(parsed)) return;
+          const current = localStorage.getItem(STORAGE_KEY);
+          if (current) pushSnapshot(current);
+          setAccounts(parsed);
+          loadSnapshots();
+          setBackupMsg({ type: "ok", text: `已恢复到 ${fmtBackupTime(new Date(snap.at).toISOString())} 的快照。` });
+        } catch {
+          setBackupMsg({ type: "err", text: "该快照已损坏，无法恢复。" });
+        }
+      }
+
+      function clearSnapshots() {
+        localStorage.removeItem(SNAPSHOT_KEY);
+        setSnapshots([]);
+        setBackupMsg({ type: "ok", text: "自动快照已清空。" });
+      }
+
+      // 打开备份面板时刷新一次快照列表
+      useEffect(() => {
+        if (showBackup) loadSnapshots();
+      }, [showBackup]);
+
+      // 备份面板里的提示 6 秒后自动消失
+      useEffect(() => {
+        if (!backupMsg || backupMsg.type === "err") return;
+        const t = setTimeout(() => setBackupMsg(null), 6000);
+        return () => clearTimeout(t);
+      }, [backupMsg]);
+
+      // ========== 日历辅助函数 ==========
+      function getWiltDate(ts, durationMs) {
+        const wiltTime = ts + durationMs;
+        const d = new Date(wiltTime);
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+      }
+
+      function getTodayStart() {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        return d.getTime();
+      }
+
+      function getDateKey(ts) {
+        const d = new Date(ts);
+        return `${d.getMonth() + 1}月${d.getDate()}日`;
+      }
+
+      function getDayLabel(ts, index) {
+        if (index === 0) return "今天";
+        if (index === 1) return "明天";
+        const d = new Date(ts);
+        return `${d.getMonth() + 1}/${d.getDate()}`;
+      }
+
+      function getCalendarData(searchQuery = "") {
+        const data = {};
+        const todayStart = getTodayStart();
+        const todayEnd = todayStart + 86400000;
+        const query = searchQuery.trim();
+
+        // 判断搜索类型
+        const isAccountSearch = /^\d+$/.test(query);     // 纯数字 → 按账号ID过滤
+        const isCollapsedSearch = query === "//";        // // → 按折叠账号过滤
+        const isFlowerSearch = query && !isAccountSearch && !isCollapsedSearch; // 其他 → 按花名过滤
+
+        // 过滤函数：判断一朵花是否应该被统计
+        const shouldIncludeFlower = (account, flower) => {
+          if (!query) return true; // 无搜索，全部包含
+
+          if (isCollapsedSearch) {
+            // 只统计折叠账号的花
+            return collapsedAccounts.has(account.accountId);
+          }
+
+          if (isAccountSearch) {
+            // 按账号ID过滤：只包含匹配账号的所有花
+            return account.accountId.includes(query);
+          }
+
+          // 按花名过滤：只包含匹配花名的花
+          return flower.name.toLowerCase().includes(query.toLowerCase());
+        };
+
+        // 过滤函数：判断账号是否应该被统计（用于 revived 统计，因为 revived 没有 flower 信息）
+        const shouldIncludeAccount = (account) => {
+          if (!query) return true;
+          if (isCollapsedSearch) return collapsedAccounts.has(account.accountId);
+          if (isAccountSearch) return account.accountId.includes(query);
+          return true; // 花名搜索时，账号级别的 revived 需要遍历所有账号找匹配的花
+        };
+
+        for (let i = 0; i < 14; i++) {
+          data[todayStart + i * 86400000] = {
+            count: 0,
+            revived: 0,
+            pending: 0,
+            flowers: []
+          };
+        }
+
+        // 先统计今天已复活的花（从 revivedTodayIds）
+        accounts.forEach(a => {
+          if (!shouldIncludeAccount(a)) return;
+          a.flowers.forEach(f => {
+            if (revivedTodayIds.has(f.id) && shouldIncludeFlower(a, f)) {
+              data[todayStart].revived += f.count;
+            }
+          });
+        });
+
+        // 再统计今天待处理的花（当前状态是已过期或今天枯萎）
+        accounts.forEach(a => {
+          a.flowers.forEach(f => {
+            if (!shouldIncludeFlower(a, f)) return;
+            if (f.revivalTime === null) return; // 未记录不算
+
+            const rem = remMs(f);
+            if (rem === null) return;
+
+            const wiltTime = f.revivalTime + f.durationMs;
+            const isExpired = rem <= 0; // 已枯萎
+            const isTodayWilt = wiltTime >= todayStart && wiltTime < todayEnd; // 今天内枯萎
+
+            // 只统计未复活的
+            if (!revivedTodayIds.has(f.id) && (isExpired || isTodayWilt)) {
+              data[todayStart].pending += f.count;
+              data[todayStart].flowers.push(f);
+            }
+          });
+        });
+
+        data[todayStart].count = data[todayStart].revived + data[todayStart].pending;
+
+        // 明天及未来
+        accounts.forEach(a => {
+          a.flowers.forEach(f => {
+            if (!shouldIncludeFlower(a, f)) return;
+            if (f.revivalTime === null) return;
+            const rem = remMs(f);
+            if (rem === null) return;
+
+            const wiltTime = f.revivalTime + f.durationMs;
+            if (rem <= 0) return; // 已枯萎的已处理
+            if (wiltTime >= todayStart && wiltTime < todayEnd) return; // 今天枯萎的已处理
+
+            const wiltDate = getWiltDate(f.revivalTime, f.durationMs);
+            const dayIndex = Math.floor((wiltDate - todayStart) / 86400000);
+
+            if (dayIndex >= 1 && dayIndex < 14) {
+              const key = todayStart + dayIndex * 86400000;
+              if (data[key]) {
+                data[key].count += f.count;
+              }
+            }
+          });
+        });
+
+        return Object.entries(data).map(([timestamp, info]) => ({
+          timestamp: parseInt(timestamp),
+          ...info,
+        }));
+      }
+
+      function getExpiredCount() {
+        return accounts.reduce((sum, a) => {
+          const accountExpired = a.flowers.reduce((flowerSum, f) => {
+            if (f.revivalTime === null) return flowerSum;
+            const rem = remMs(f);
+            if (rem !== null && rem <= -86400000) {
+              return flowerSum + f.count;
+            }
+            return flowerSum;
+          }, 0);
+          return sum + accountExpired;
+        }, 0);
+      }
+
+      // ========== 收集进度相关函数 ==========
+
+      // 计算某花近14天的枯萎总数（所有账号）
+      // 单色花按100%计算，双色花按50%计算，昙花14天内会枯萎7轮所以乘7
+      function getFlowerWiltCount14Days(flowerName) {
+        const todayStart = getTodayStart();
+        let singleColorCount = 0;   // 单色花数量
+        let dualColorCount = 0;     // 双色花数量（目标包含该珍稀花的）
+
+        accounts.forEach(a => {
+          a.flowers.forEach(f => {
+            if (f.revivalTime === null) return;
+            const rem = remMs(f);
+            if (rem === null) return;
+
+            // 统计14天内会枯萎的（包括已枯萎的）
+            const wiltDate = getWiltDate(f.revivalTime, f.durationMs);
+            const dayIndex = Math.floor((wiltDate - todayStart) / 86400000);
+            if (dayIndex < 0 || dayIndex >= 14) return;
+
+            const normalizedName = f.name.replace(/^\d+/, ""); // 去掉前缀数字
+
+            // 判断是单色还是双色
+            const rareTargets = getRareTargetsFromDual(f.name);
+
+            if (rareTargets.length === 0) {
+              // 单色花：直接匹配花名
+              if (normalizedName.includes(flowerName)) {
+                singleColorCount += f.count;
+              }
+            } else {
+              // 双色花：检查目标是否包含当前统计的珍稀花
+              if (rareTargets.includes(flowerName)) {
+                dualColorCount += f.count;
+              }
+            }
+          });
+        });
+
+        // 单色花100% + 双色花50%
+        const effectiveCount = singleColorCount + dualColorCount * 0.5;
+
+        // 昙花特殊处理：48小时周期，14天内会枯萎7轮
+        const isEphemeral = flowerName.includes('昙花');
+        const multiplier = isEphemeral ? 7 : 1;
+
+        return effectiveCount * multiplier;
+      }
+
+      // 计算预计完成天数
+      // 注意：getFlowerWiltCount14Days 已经考虑了昙花的7倍乘数
+      // 所以这里直接除以14就是每天平均可获得数量
+      function getEstimatedDays(flowerName, needed, owned) {
+        const remaining = needed - owned;
+        if (remaining <= 0) return 0;
+        const effectiveCount14 = getFlowerWiltCount14Days(flowerName);
+        if (effectiveCount14 <= 0) return null; // 无法计算
+        const perDay = effectiveCount14 / 14;
+        const days = remaining / perDay;
+        return Math.ceil(days);
+      }
+
+      // 统计账号中某花的实际数量（单色+双色），只统计有枯萎时间记录的花
+      // 返回 { single: 单色数量, dual: 双色数量 }
+      function getAccountFlowerStats(flowerName) {
+        let single = 0;
+        let dual = 0;
+        // 规范化目标花名：去掉"花"字后缀，用于模糊匹配
+        const normalizedTarget = flowerName.replace(/花$/, "");
+        accounts.forEach(a => {
+          a.flowers.forEach(f => {
+            // 只统计有枯萎时间记录的花
+            if (f.revivalTime === null) return;
+            const normalizedName = f.name.replace(/^\d+/, "");
+            const rareTargets = getRareTargetsFromDual(f.name);
+            if (rareTargets.length === 0) {
+              // 单色花：去掉"花"字后模糊匹配
+              const nameWithoutFlower = normalizedName.replace(/花$/, "");
+              if (nameWithoutFlower === normalizedTarget) {
+                single += f.count;
+              }
+            } else {
+              // 双色花：目标包含该珍稀花（也做模糊匹配）
+              const matched = rareTargets.some(target => {
+                const targetWithoutFlower = target.replace(/花$/, "");
+                return targetWithoutFlower === normalizedTarget;
+              });
+              if (matched) {
+                dual += f.count;
+              }
+            }
+          });
+        });
+        return { single, dual };
+      }
+
+      // 更新收集进度的 owned（复活时调用）
+      function addToCollection(flowerName, count) {
+        setCollectionGoals(prev => {
+          const current = prev[flowerName] || { needed: 0, owned: 0 };
+          return {
+            ...prev,
+            [flowerName]: {
+              ...current,
+              owned: current.owned + count,
+            },
+          };
+        });
+      }
+
+      // 设置收集目标
+      function setCollectionGoal(flowerName, needed, owned) {
+        setCollectionGoals(prev => ({
+          ...prev,
+          [flowerName]: { needed, owned },
+        }));
+      }
+
+      // 删除收集目标
+      function removeCollectionGoal(flowerName) {
+        setCollectionGoals(prev => {
+          const next = { ...prev };
+          delete next[flowerName];
+          return next;
+        });
+      }
+
+      // ========== 【调试】暴露 accounts 到 window，方便 Console 调试 ==========
+      useEffect(() => {
+        window.__debugAccounts = accounts;
+        window.__debugGetExpired = () => {
+          const result = [];
+          accounts.forEach(a => {
+            a.flowers.forEach(f => {
+              if (f.revivalTime === null) return;
+              const rem = remMs(f);
+              if (rem !== null && rem <= -86400000) {
+                result.push({
+                  accountId: a.accountId,
+                  name: f.name,
+                  count: f.count,
+                  remMs: rem,
+                  remDays: (rem / 86400000).toFixed(2),
+                  revivalTime: new Date(f.revivalTime).toLocaleString('zh-CN'),
+                  durationHours: f.durationMs / 3600000,
+                });
+              }
+            });
+          });
+          console.log('=== 过期花朵调试 ===');
+          console.log('过期总数:', result.reduce((s, r) => s + r.count, 0));
+          console.log('过期明细:', result);
+          return result;
+        };
+      }, [accounts]);
+
+      // ========== 今日复活计数 ==========
+      function incrementTodayRevived() {
+        setTodayRevived(prev => {
+          const newCount = prev + 1;
+          localStorage.setItem(TODAY_KEY, JSON.stringify({
+            date: new Date().toDateString(),
+            count: newCount,
+          }));
+          return newCount;
+        });
+      }
+
+      function saveFlowerRename(accountId, flowerId) {
+        if (!editingFlower || !editingFlower.text.trim()) {
+          setEditingFlower(null);
+          return;
+        }
+        const text = editingFlower.text.trim();
+        const m = text.match(/^(.+?)(\d+)$/);
+        if (!m) {
+          setEditingFlower(null);
+          return;
+        }
+        const newName = m[1];
+        const newCount = parseInt(m[2]);
+        setAccounts(prev => prev.map(a =>
+          a.accountId !== accountId ? a
+            : { ...a, flowers: a.flowers.map(f => f.id === flowerId ? { ...f, name: newName, count: newCount } : f) }
+        ));
+        setEditingFlower(null);
+      }
+
+      function saveAccountRename(oldAccountId) {
+        if (!editingFlower || !editingFlower.text.trim()) {
+          setEditingFlower(null);
+          return;
+        }
+        const newAccountId = editingFlower.text.trim();
+        if (!newAccountId || newAccountId === oldAccountId) {
+          setEditingFlower(null);
+          return;
+        }
+        // 检查是否已存在
+        if (accounts.some(a => a.accountId === newAccountId && a.accountId !== oldAccountId)) {
+          alert("该账号ID已存在！");
+          setEditingFlower(null);
+          return;
+        }
+        setAccounts(prev => prev.map(a =>
+          a.accountId !== oldAccountId ? a : { ...a, accountId: newAccountId }
+        ));
+
+        // 同步迁移以 accountId 为键的附属数据，否则提醒 / 折叠 / 置顶会静默失效
+        setAccountReminders(prev => {
+          const next = new Set(prev);
+          if (next.delete(oldAccountId)) next.add(newAccountId);
+          writeJSON(REMINDER_KEY, Array.from(next));
+          return next;
+        });
+        setCollapsedAccounts(prev => {
+          const next = new Set(prev);
+          if (next.delete(oldAccountId)) next.add(newAccountId);
+          return next;
+        });
+        if (pinnedAccountId === oldAccountId) setPinnedAccountId(newAccountId);
+        if (window.__reminderState?.[oldAccountId]) {
+          window.__reminderState[newAccountId] = window.__reminderState[oldAccountId];
+          delete window.__reminderState[oldAccountId];
+        }
+
+        setEditingFlower(null);
+      }
+
+      // ========== 【修改】doImport 使用新的 parseInput ==========
+      function doImport() {
+        // 格式1：旧格式（无剩余时长，自动检测 # 号），格式2：带剩余时长，无需 # 号
+        const format1Result = importText.trim() ? parseInput(importText) : [];
+        const format2Result = importText2.trim() ? parseInput(importText2, true) : [];
+
+        // 合并两种格式的结果
+        const allParsed = [...format1Result, ...format2Result];
+
+        if (allParsed.length === 0) {
+          setImportError("没有可导入的数据，请检查输入格式\n格式1：花名+数量 账号ID\n格式2：花名+数量 小时 分钟，账号ID单独一行");
+          return;
+        }
+
+        setAccounts(prev => {
+          const next = [...prev];
+          for (const p of allParsed) {
+            const idx = next.findIndex(a => a.accountId === p.accountId);
+            if (idx === -1) next.push(p);
+            else {
+              const merged = [...next[idx].flowers];
+              for (const f of p.flowers) {
+                if (!merged.find(mf => mf.name === f.name)) merged.push(f);
+              }
+              next[idx] = { ...next[idx], flowers: merged };
+            }
+          }
+          return next;
+        });
+
+        // 清理提醒：只保留当前存在的账号
+        setAccountReminders(prev => {
+          const currentIds = new Set(accounts.map(a => a.accountId));
+          allParsed.forEach(p => currentIds.add(p.accountId));
+          const newSet = new Set([...prev].filter(id => currentIds.has(id)));
+          localStorage.setItem(REMINDER_KEY, JSON.stringify(Array.from(newSet)));
+          return newSet;
+        });
+
+        setImportText(""); setImportText2(""); setImportError(""); setShowImport(false);
+      }
+
+      function reviveOne(accountId, flowerId) {
+        const now = Date.now();
+        const account = accounts.find(a => a.accountId === accountId);
+        const flower = account ? account.flowers.find(fl => fl.id === flowerId) : null;
+        const addCount = flower ? flower.count : 0;
+        // 用「账号ID|花名」做今日去重键，uid 在导入备份后会重新生成
+        const todayKey = flower ? stableFlowerKey(accountId, flower.name) : null;
+
+        // 检查是否是双色花
+        const rareTargets = flower ? getRareTargetsFromDual(flower.name) : [];
+        if (rareTargets.length > 0) {
+          // 双色花：弹出分配弹窗
+          setDualColorModal({
+            mode: 'single',
+            flowerName: flower.name,
+            count: addCount,
+            targets: rareTargets,
+            allocations: rareTargets.map(() => 0),
+            onConfirm: (allocations) => {
+              // 用户确认后执行复活
+              setAccounts(prev => prev.map(a =>
+                a.accountId !== accountId ? a
+                  : { ...a, flowers: a.flowers.map(fl => fl.id === flowerId ? { ...fl, revivalTime: now, durationMs: fl.name.includes('昙花') ? EPHEMERAL_MS : DEFAULT_MS } : fl) }
+              ));
+
+              if (addCount > 0 && todayKey && !revivedTodayIds.has(todayKey)) {
+                setTodayRevived(prev => {
+                  const newCount = prev + addCount;
+                  localStorage.setItem(TODAY_KEY, JSON.stringify({
+                    date: new Date().toDateString(),
+                    count: newCount,
+                  }));
+                  return newCount;
+                });
+
+                setRevivedTodayIds(prev => {
+                  const newSet = new Set(prev);
+                  newSet.add(todayKey);
+                  localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({
+                    date: new Date().toDateString(),
+                    ids: Array.from(newSet),
+                  }));
+                  return newSet;
+                });
+
+                // 更新收集进度
+                allocations.forEach((count, idx) => {
+                  if (count > 0) {
+                    addToCollection(rareTargets[idx], count);
+                  }
+                });
+              }
+              setDualColorModal(null);
+            },
+          });
+          return;
+        }
+
+        // 单色花：直接复活
+        setAccounts(prev => prev.map(a =>
+          a.accountId !== accountId ? a
+            : { ...a, flowers: a.flowers.map(fl => fl.id === flowerId ? { ...fl, revivalTime: now, durationMs: fl.name.includes('昙花') ? EPHEMERAL_MS : DEFAULT_MS } : fl) }
+        ));
+
+        if (addCount > 0 && todayKey && !revivedTodayIds.has(todayKey)) {
+          setTodayRevived(prev => {
+            const newCount = prev + addCount;
+            localStorage.setItem(TODAY_KEY, JSON.stringify({
+              date: new Date().toDateString(),
+              count: newCount,
+            }));
+            return newCount;
+          });
+
+          setRevivedTodayIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(todayKey);
+            localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({
+              date: new Date().toDateString(),
+              ids: Array.from(newSet),
+            }));
+            return newSet;
+          });
+
+          // 更新收集进度（如果该花在珍稀列表中）
+          // 使用规范化花名（去掉前缀数字）匹配和存储
+          const normalizedFlowerName = flower.name.replace(/^\d+/, "");
+          if (flower && RARE_FLOWERS.includes(normalizedFlowerName)) {
+            addToCollection(normalizedFlowerName, addCount);
+          }
+        }
+      }
+
+      function reviveAll(accountId) {
+        const now = Date.now();
+        const account = accounts.find(a => a.accountId === accountId);
+        const allFlowers = account ? account.flowers : [];
+        const newRevived = allFlowers.filter(f => !revivedTodayIds.has(stableFlowerKey(accountId, f.name)));
+
+        // 分离单色花和双色花
+        const singleColorFlowers = [];
+        const dualColorFlowers = [];
+        newRevived.forEach(f => {
+          const rareTargets = getRareTargetsFromDual(f.name);
+          if (rareTargets.length > 0) {
+            dualColorFlowers.push({ ...f, rareTargets });
+          } else {
+            singleColorFlowers.push(f);
+          }
+        });
+
+        // 如果有双色花，弹出汇总分配弹窗
+        if (dualColorFlowers.length > 0) {
+          setDualColorModal({
+            mode: 'batch',
+            flowers: dualColorFlowers,
+            singleColorFlowers: singleColorFlowers,
+            accountId: accountId,
+            onConfirm: (allAllocations) => {
+              // 确认后执行所有复活
+              setAccounts(prev => prev.map(a =>
+                a.accountId !== accountId ? a
+                  : { ...a, flowers: a.flowers.map(f => ({ ...f, revivalTime: now, durationMs: f.name.includes('昙花') ? EPHEMERAL_MS : DEFAULT_MS })) }
+              ));
+
+              const totalAddCount = newRevived.reduce((sum, f) => sum + f.count, 0);
+              if (totalAddCount > 0) {
+                setTodayRevived(prev => {
+                  const newCount = prev + totalAddCount;
+                  localStorage.setItem(TODAY_KEY, JSON.stringify({ date: new Date().toDateString(), count: newCount }));
+                  return newCount;
+                });
+                setRevivedTodayIds(prev => {
+                  const newSet = new Set(prev);
+                  newRevived.forEach(f => newSet.add(stableFlowerKey(accountId, f.name)));
+                  localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({ date: new Date().toDateString(), ids: Array.from(newSet) }));
+                  return newSet;
+                });
+
+                // 更新单色花的收集进度
+                singleColorFlowers.forEach(f => {
+                  const normalizedName = f.name.replace(/^\d+/, "");
+                  if (RARE_FLOWERS.includes(normalizedName)) {
+                    addToCollection(normalizedName, f.count);
+                  }
+                });
+
+                // 更新双色花的收集进度
+                allAllocations.forEach(({ targets, allocations }) => {
+                  allocations.forEach((count, idx) => {
+                    if (count > 0) {
+                      addToCollection(targets[idx], count);
+                    }
+                  });
+                });
+              }
+              setDualColorModal(null);
+            },
+          });
+          return;
+        }
+
+        // 只有单色花：直接复活
+        const addCount = newRevived.reduce((sum, f) => sum + f.count, 0);
+
+        setAccounts(prev => prev.map(a =>
+          a.accountId !== accountId ? a
+            : { ...a, flowers: a.flowers.map(f => ({ ...f, revivalTime: now, durationMs: f.name.includes('昙花') ? EPHEMERAL_MS : DEFAULT_MS })) }
+        ));
+
+        if (addCount > 0) {
+          setTodayRevived(prev => {
+            const newCount = prev + addCount;
+            localStorage.setItem(TODAY_KEY, JSON.stringify({ date: new Date().toDateString(), count: newCount }));
+            return newCount;
+          });
+          setRevivedTodayIds(prev => {
+            const newSet = new Set(prev);
+            newRevived.forEach(f => newSet.add(stableFlowerKey(accountId, f.name)));
+            localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({ date: new Date().toDateString(), ids: Array.from(newSet) }));
+            return newSet;
+          });
+
+          // 更新收集进度
+          singleColorFlowers.forEach(f => {
+            const normalizedName = f.name.replace(/^\d+/, "");
+            if (RARE_FLOWERS.includes(normalizedName)) {
+              addToCollection(normalizedName, f.count);
+            }
+          });
+        }
+      }
+
+      // ========== 【修改】打开设置弹窗时置顶该账号 ==========
+      function openModal(accountId, flowerId, f) {
+        const totalDurationMs = f.name.includes('昙花') ? EPHEMERAL_MS : DEFAULT_MS;
+        let revivalTimeStr, hours;
+
+        if (f.revivalTime !== null) {
+          revivalTimeStr = toDatetimeLocal(f.revivalTime);
+          const remainingHours = calcRemainingFromRevivalTime(f.revivalTime, totalDurationMs);
+          hours = String(Math.max(0, Math.round(remainingHours * 10) / 10));
+        } else {
+          revivalTimeStr = toDatetimeLocal(Date.now());
+          hours = String(Math.round(totalDurationMs / 3600000));
+        }
+
+        setModal({
+          accountId, flowerId,
+          hours,
+          revivalTimeStr,
+          totalDurationMs,
+        });
+
+        // 【新增】置顶该账号
+        setPinnedAccountId(accountId);
+      }
+
+      function saveModal() {
+        // 解析 hours（支持 "3.5" 或 "3 30"）
+        let totalHours = null;
+        const inputValue = modal.hours;
+
+        if (inputValue.includes(' ')) {
+          const parts = inputValue.trim().split(/\s+/);
+          if (parts.length === 2) {
+            const hours = parseFloat(parts[0]);
+            const minutes = parseFloat(parts[1]);
+            if (!isNaN(hours) && !isNaN(minutes)) {
+              totalHours = hours + (minutes / 60);
+            }
+          }
+        } else {
+          totalHours = parseFloat(inputValue);
+        }
+
+        if (isNaN(totalHours) || totalHours < 0) return;
+
+        const rt = modal.revivalTimeStr ? new Date(modal.revivalTimeStr).getTime() : null;
+        setAccounts(prev => prev.map(a =>
+          a.accountId !== modal.accountId ? a : {
+            ...a,
+            flowers: a.flowers.map(f =>
+              f.id !== modal.flowerId ? f
+                : { ...f, durationMs: modal.totalDurationMs, revivalTime: isNaN(rt) ? f.revivalTime : rt }
+            ),
+          }
+        ));
+        setModal(null);
+      }
+
+      function deleteAccount(id) {
+        setAccounts(prev => prev.filter(a => a.accountId !== id));
+        // 同步清理该账号的提醒记录
+        setAccountReminders(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(id);
+          writeJSON(REMINDER_KEY, Array.from(newSet));
+          // 同步清理状态记录
+          if (window.__reminderState?.[id]) {
+            delete window.__reminderState[id];
+          }
+          return newSet;
+        });
+        // 同步清理折叠与置顶记录
+        setCollapsedAccounts(prev => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        if (pinnedAccountId === id) setPinnedAccountId(null);
+        setConfirmDel(null);
+      }
+
+      function deleteFlower(accountId, flowerId) {
+        setAccounts(prev => prev.map(a =>
+          a.accountId !== accountId ? a
+            : { ...a, flowers: a.flowers.filter(f => f.id !== flowerId) }
+        ));
+      }
+
+      async function copyText(text, id) {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopiedId(id);
+          setTimeout(() => setCopiedId(null), 1500);
+        } catch {
+          const ta = document.createElement("textarea");
+          ta.value = text;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand("copy");
+          document.body.removeChild(ta);
+          setCopiedId(id);
+          setTimeout(() => setCopiedId(null), 1500);
+        }
+      }
+
+      function openAddModal(accountId) {
+        setAddModal({ accountId, text: "", error: "" });
+      }
+
+      function doAddFlower() {
+        if (!addModal || !addModal.text.trim()) return;
+        const parts = addModal.text.trim().split(/\s+/);
+        const newFlowers = [];
+        for (const p of parts) {
+          const m = p.match(/^(.+?)(\d+)$/);
+          if (m) {
+            const exists = accounts.find(a => a.accountId === addModal.accountId)?.flowers.some(f => f.name === m[1]);
+            if (!exists) {
+              newFlowers.push({ id: uid(), name: m[1], count: parseInt(m[2]), revivalTime: null, durationMs: DEFAULT_MS });
+            }
+          }
+        }
+        if (!newFlowers.length) {
+          setAddModal(prev => ({ ...prev, error: "格式错误或花朵已存在，请使用 花名+数量 格式" }));
+          return;
+        }
+        setAccounts(prev => prev.map(a =>
+          a.accountId !== addModal.accountId ? a
+            : { ...a, flowers: [...a.flowers, ...newFlowers] }
+        ));
+        setAddModal(null);
+      }
+
+      // ========== 【修改】排序逻辑：置顶账号永远在最前面 ==========
+      const sorted = [...accounts].sort((a, b) => {
+        // 【新增】置顶账号排在最前面
+        if (a.accountId === pinnedAccountId && b.accountId !== pinnedAccountId) return -1;
+        if (b.accountId === pinnedAccountId && a.accountId !== pinnedAccountId) return 1;
+
+        // 新添加的账号（所有花都是未记录状态）排在最前面
+        const aAllUnknown = a.flowers.every(f => f.revivalTime === null);
+        const bAllUnknown = b.flowers.every(f => f.revivalTime === null);
+        if (aAllUnknown && !bAllUnknown) return -1;
+        if (!aAllUnknown && bAllUnknown) return 1;
+
+        // 其余按最紧急的花排序（剩余时间越短越靠前）
+        const minRem = acc => {
+          const rs = acc.flowers.map(f => remMs(f)).filter(r => r !== null);
+          return rs.length ? Math.min(...rs) : Infinity;
+        };
+        return minRem(a) - minRem(b);
+      });
+
+      // ========== 搜索过滤 ==========
+      const filteredSorted = sorted.filter(account => {
+        // 搜索"//"显示所有折叠账号
+        if (searchText.trim() === "//") {
+          return collapsedAccounts.has(account.accountId);
+        }
+        // 无搜索时：折叠的账号不显示
+        if (!searchText.trim()) {
+          return !collapsedAccounts.has(account.accountId);
+        }
+        // 有搜索关键词时：所有账号（包括折叠的）都参与匹配
+        const query = searchText.trim().toLowerCase();
+        // 匹配账号ID
+        if (account.accountId.toLowerCase().includes(query)) return true;
+        // 匹配花名（部分匹配）
+        return account.flowers.some(f => f.name.toLowerCase().includes(query));
+      });
+
+
+      const collapsedStats = accounts.reduce((stats, a) => {
+        if (!collapsedAccounts.has(a.accountId)) return stats;
+
+        const wilted = a.flowers.filter(f => {
+          if (f.revivalTime === null) return false;
+          const rem = remMs(f);
+          return rem !== null && rem <= 0;
+        }).reduce((sum, f) => sum + f.count, 0);
+
+        const unknown = a.flowers.filter(f => f.revivalTime === null).reduce((sum, f) => sum + f.count, 0);
+
+        return {
+          wilted: stats.wilted + wilted,
+          unknown: stats.unknown + unknown,
+        };
+      }, { wilted: 0, unknown: 0 });
+
+      const totalFlowers = accounts.reduce((s, a) =>
+        s + a.flowers.reduce((sum, f) => sum + (f.count || 0), 0), 0);
+      const wiltedCount = accounts.reduce((s, a) =>
+        s + a.flowers.filter(f => {
+          if (f.revivalTime === null) return false;
+          const rem = remMs(f);
+          return rem !== null && rem <= 0;
+        }).reduce((sum, f) => sum + (f.count || 0), 0), 0);
+
+
+      return (
+        // ========== 【修改】根容器点击时取消置顶 ==========
+        <div
+          style={{ minHeight: "100vh", background: C.bg, color: C.text, padding: "16px 14px", boxSizing: "border-box" }}
+          onClick={(e) => {
+            // 只有点「空白背景」才取消置顶；点按钮 / 输入框不该顺带把置顶清掉
+            if (!pinnedAccountId) return;
+            if (e.target.closest && e.target.closest("button, input, textarea, select, label, a")) return;
+            setPinnedAccountId(null);
+          }}
+        >
+          <div style={{ maxWidth: 720, margin: "0 auto" }}>
+
+            {/* ========== 固定顶部包裹层 ========== */}
+            <div style={{
+              position: "sticky",
+              top: -16,
+              zIndex: 100,
+              marginTop: -16,
+              paddingTop: 16,
+            }}>
+
+              {/* ========== 顶部标题栏 ========== */}
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                marginBottom: 10,
+                background: C.bg,
+                paddingBottom: 4,
+                borderBottom: `1px solid ${C.border}`,
+              }}>
+
+                {/* 左侧：标题 + 统计 */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: C.accent }}>🌸 花园复活追踪</div>
+                  <div style={{ fontSize: 13, color: C.muted, marginTop: 4, paddingLeft: 2, lineHeight: 1.5 }}>
+                    <div>{accounts.length} 个账号 · {totalFlowers} 朵花{wiltedCount > 0 && <span style={{ color: C.wilted, marginLeft: 8 }}>· {wiltedCount} 朵已枯萎</span>}</div>
+                    {(collapsedStats.wilted > 0 || collapsedStats.unknown > 0) && (
+                      <div style={{ fontSize: 12, opacity: 0.8 }}>
+                        折叠中 {collapsedStats.wilted > 0 && <span style={{ color: C.wilted }}>{collapsedStats.wilted}已枯萎</span>}
+                        {collapsedStats.wilted > 0 && collapsedStats.unknown > 0 && ' · '}
+                        {collapsedStats.unknown > 0 && <span style={{ color: C.unknown }}>{collapsedStats.unknown}未记录</span>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div style={{ flexShrink: 0, display: "flex", gap: 8, alignItems: "center" }}>
+                  <ThemeToggle theme={theme} setTheme={setTheme} />
+
+                  <button
+                    onClick={() => { setShowBackup(v => !v); setBackupMsg(null); }}
+                    style={{ ...btn(showBackup ? C.alive : C.accent), padding: "7px 16px", fontSize: 14 }}
+                  >
+                    💾 备份同步
+                  </button>
+                  <button onClick={() => {
+                    if (showCalendar) setShowCalendar(false);  // ← 新增：如果日历展开则缩回
+                    setShowImport(!showImport);
+                    setImportError("");
+                  }}
+                    style={{ ...btn(C.accent), padding: "7px 16px", fontSize: 14 }}
+                  >
+                    {showImport ? "收起" : "+ 添加账号"}
+                  </button>
+                </div>
+              </div>
+
+              {/* ========== 日历概览面板 ========== */}
+              <div style={{
+                position: "relative",           // ← 新增：作为绝对定位参考
+                background: isDark ? "rgba(19, 18, 24, 0.3)" : "rgba(255, 255, 255, 0.3)",
+                backdropFilter: "blur(12px)",
+                WebkitBackdropFilter: "blur(12px)",
+                border: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"}`,
+                borderRadius: 12,
+                marginBottom: 10,
+                // overflow: "hidden"  ← 删除这行，否则绝对定位内容会被裁切
+              }}>
+                {/* 日历头部 */}
+                <div
+                  onClick={() => setShowCalendar(!showCalendar)}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "10px 14px",
+                    cursor: "pointer",
+                    borderBottom: `1px solid ${C.border}`,  // ← 始终保留，不要条件切换
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: C.accent }}>
+                      {(() => {
+                        const q = searchText.trim();
+                        if (q === "//") return "📅 折叠账号枯萎日历";
+                        if (/^\d+$/.test(q)) return `📅 账号 #${q} 枯萎日历`;
+                        if (q) return `📅 "${q}" 枯萎日历`;
+                        return "📅 近14天枯萎日历";
+                      })()}
+                    </span>
+                    {(() => {
+                      const expiredCount = getExpiredCount();
+                      return expiredCount > 0 && !searchText.trim() && (
+                        <span style={{
+                          display: "inline-block", borderRadius: 12,
+                          padding: "2px 10px", fontSize: 12, fontWeight: 700,
+                          background: C.wilted + "30", color: C.wilted,
+                          border: `1px solid ${C.wilted}60`,
+                        }}>{expiredCount}朵已过期</span>
+                      );
+                    })()}
+                  </div>
+                  {/* 中间：搜索框 */}
+                  <div style={{
+                    flex: 1,
+                    display: "flex",
+                    justifyContent: "center",
+                    alignItems: "center",
+                    padding: "0 12px",
+                  }} onClick={e => e.stopPropagation()}>  {/* ← 新增：阻止冒泡 */}
+                    <div style={{
+                      position: "relative",
+                      display: "flex",
+                      alignItems: "center",
+                      maxWidth: 200,
+                      width: "100%",
+                    }}>
+                      <span style={{
+                        position: "absolute",
+                        left: 10,
+                        fontSize: 13,
+                        color: C.muted,
+                        pointerEvents: "none",
+                      }}>🔍</span>
+                      <input
+                        type="text"
+                        value={searchText}
+                        onChange={e => setSearchText(e.target.value)}
+                        placeholder="搜索花名、账号ID或 // 查看折叠"
+                        style={{
+                          width: "100%",
+                          background: isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)",
+                          backdropFilter: "blur(12px)",
+                          WebkitBackdropFilter: "blur(12px)",
+                          border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+                          borderRadius: 20,
+                          padding: "5px 28px 5px 30px",
+                          color: C.text,
+                          fontSize: 12,
+                          fontFamily: "inherit",
+                          outline: "none",
+                          transition: "border-color 0.2s, background 0.2s",
+                        }}
+                        onFocus={e => {
+                          e.target.style.borderColor = isDark ? "rgba(180, 143, 208, 0.4)" : "rgba(123, 79, 160, 0.3)";
+                          e.target.style.background = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.06)";
+                        }}
+                        onBlur={e => {
+                          e.target.style.borderColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)";
+                          e.target.style.background = isDark ? "rgba(255, 255, 255, 0.06)" : "rgba(0, 0, 0, 0.04)";
+                        }}
+                      />
+                      {searchText && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setSearchText(""); }}
+                          style={{
+                            position: "absolute",
+                            right: 8,
+                            background: "transparent",
+                            border: "none",
+                            color: C.muted,
+                            fontSize: 11,
+                            cursor: "pointer",
+                            padding: "2px 4px",
+                          }}
+                        >✕</button>
+                      )}
+                    </div>
+                    {/* 搜索结果数量 */}
+                    {searchText.trim() && searchText.trim() !== "//" && (
+                      <span style={{
+                        fontSize: 11,
+                        color: C.muted,
+                        marginLeft: 8,
+                        whiteSpace: "nowrap",
+                      }}>
+                        {filteredSorted.reduce((sum, a) => sum + a.flowers.filter(f => {
+                          const q = searchText.trim().toLowerCase();
+                          return f.name.toLowerCase().includes(q);
+                        }).length, 0)} 个结果
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: C.muted }}>
+                      {getCalendarData(searchText)[0].pending > 0
+                        ? `待处理 ${getCalendarData(searchText)[0].pending} 朵`
+                        : "今日任务已完成"}
+                      （今日额度 {todayRevived}/30）
+                    </span>
+                    <span style={{
+                      fontSize: 12,
+                      color: C.muted,
+                      transform: showCalendar ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 0.2s",
+                    }}>
+                      ▼
+                    </span>
+                  </div>
+                </div>
+
+                {/* 日历内容 —— 绝对定位，脱离文档流，像下拉菜单一样覆盖在下方 */}
+                {(showCalendar || calendarVisible) && (
+                  <div style={{
+                    position: "absolute",
+                    top: "100%",
+                    left: 0,
+                    right: 0,
+                    zIndex: 50,
+                    overflow: "hidden",
+                    transform: showCalendar && calendarAnimating ? "scaleY(1)" : "scaleY(0)",
+                    transformOrigin: "top",
+                    opacity: showCalendar && calendarAnimating ? 1 : 0,
+                    transition: showCalendar
+                      ? "transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease-out"
+                      : "transform 0.25s ease-in, opacity 0.2s ease-in",
+                    background: isDark ? "rgba(19, 18, 24, 0.95)" : "rgba(255, 255, 255, 0.95)",
+                    backdropFilter: "blur(12px)",
+                    WebkitBackdropFilter: "blur(12px)",
+                    borderRadius: "0 0 12px 12px",
+                    border: `1px solid ${isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)"}`,
+                    borderTop: "none",
+                  }}>
+                    <div style={{ padding: "12px 10px" }}>
+                      {(() => {
+                        const calendarDays = getCalendarData(searchText);
+                        const maxCount = Math.max(...calendarDays.map(d => d.count), 1);
+
+                        return (
+                          <>
+                            {/* 横向时间轴 */}
+                            <div
+                              className={isDark ? "dark-scrollbar" : "light-scrollbar"}
+                              style={{
+                                display: "flex",
+                                gap: 6,
+                                overflowX: "auto",
+                                paddingBottom: 8,
+                              }}
+                            >
+                              {calendarDays.map((day, index) => {
+                                const isToday = index === 0;
+                                const totalToday = day.revived + day.pending;
+                                const isOverLimit = totalToday > 30;
+
+                                // 计算柱子高度
+                                let revivedHeight, pendingHeight;
+                                if (totalToday === 0) {
+                                  // 今天没有任务，柱子空白
+                                  revivedHeight = 0;
+                                  pendingHeight = 0;
+                                } else if (totalToday <= 30) {
+                                  // 总数不超过30，按30为满柱计算
+                                  revivedHeight = (day.revived / 30) * 100;
+                                  pendingHeight = (day.pending / 30) * 100;
+                                } else {
+                                  // 总数超过30，按比例填满
+                                  revivedHeight = (day.revived / totalToday) * 100;
+                                  pendingHeight = (day.pending / totalToday) * 100;
+                                }
+
+                                return (
+                                  <div key={day.timestamp} style={{ flex: "0 0 56px", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+                                    {/* 日期标签 */}
+                                    <div style={{
+                                      fontSize: 11,
+                                      color: isToday ? C.accent : C.muted,
+                                      fontWeight: isToday ? 700 : 400,
+                                      textAlign: "center",
+                                      whiteSpace: "nowrap",
+                                    }}>
+                                      {getDayLabel(day.timestamp, index)}
+                                    </div>
+
+                                    {/* 柱子 */}
+                                    <div style={{
+                                      width: 40,
+                                      height: 80,
+                                      background: isDark ? "#ffffff08" : "#00000006",
+                                      borderRadius: 6,
+                                      position: "relative",
+                                      overflow: "hidden",
+                                      border: isToday ? `1px solid ${C.accent}50` : `1px solid ${C.border}`,
+                                      display: "flex",
+                                      flexDirection: "column-reverse",
+                                    }}>
+                                      {isToday ? (
+                                        <>
+                                          {/* 下层：待复活（橙色/红色）- 有 pending 才显示 */}
+                                          {day.pending > 0 && (
+                                            <div style={{
+                                              width: "100%",
+                                              height: `${pendingHeight}%`,
+                                              minHeight: 4,
+                                              background: isOverLimit ? C.wilted : C.urgent,
+                                              opacity: 0.9,
+                                            }} />
+                                          )}
+
+                                          {/* 上层：已复活（绿色）- 有 revived 才显示 */}
+                                          {day.revived > 0 && (
+                                            <div style={{
+                                              width: "100%",
+                                              height: `${revivedHeight}%`,
+                                              minHeight: 4,
+                                              background: C.alive,
+                                              opacity: 0.8,
+                                            }} />
+                                          )}
+
+                                          {/* 如果都没有，显示空白占位 */}
+                                          {totalToday === 0 && (
+                                            <div style={{
+                                              width: "100%",
+                                              height: "100%",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              justifyContent: "center",
+                                            }}>
+                                              <span style={{ fontSize: 10, color: C.muted }}>-</span>
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        /* 明天及之后 */
+                                        <div style={{
+                                          width: "100%",
+                                          height: `${Math.min((day.count / 30) * 100, 100)}%`,
+                                          minHeight: day.count > 0 ? 4 : 0,
+                                          background: day.count > 30 ? "#e8a0a0" : "#e8d8a0",
+                                          opacity: 0.7,
+                                        }} />
+                                      )}
+
+                                      {/* 数字显示 */}
+                                      {isToday ? (
+                                        <>
+                                          {/* 有待处理，显示待处理数字 */}
+                                          {day.pending > 0 && (
+                                            <div style={{
+                                              position: "absolute",
+                                              bottom: "50%",
+                                              left: 0,
+                                              right: 0,
+                                              transform: "translateY(50%)",
+                                              textAlign: "center",
+                                              fontSize: 14,
+                                              fontWeight: 700,
+                                              color: "#fff",
+                                              textShadow: "0 1px 3px rgba(0,0,0,0.6)",
+                                              zIndex: 2,
+                                            }}>
+                                              {day.pending}
+                                            </div>
+                                          )}
+
+                                          {/* 没有待处理但已复活，显示 ✓ */}
+                                          {day.pending === 0 && day.revived > 0 && (
+                                            <div style={{
+                                              position: "absolute",
+                                              bottom: "50%",
+                                              left: 0,
+                                              right: 0,
+                                              transform: "translateY(50%)",
+                                              textAlign: "center",
+                                              fontSize: 16,
+                                              fontWeight: 700,
+                                              color: C.alive,
+                                              textShadow: "0 1px 3px rgba(0,0,0,0.6)",
+                                              zIndex: 2,
+                                            }}>
+                                              ✓
+                                            </div>
+                                          )}
+
+                                          {/* 什么都没有，显示 - */}
+                                          {totalToday === 0 && (
+                                            <div style={{
+                                              position: "absolute",
+                                              bottom: "50%",
+                                              left: 0,
+                                              right: 0,
+                                              transform: "translateY(50%)",
+                                              textAlign: "center",
+                                              fontSize: 12,
+                                              color: C.muted,
+                                              zIndex: 2,
+                                            }}>
+                                              -
+                                            </div>
+                                          )}
+                                        </>
+                                      ) : (
+                                        /* 明天及之后显示总数 */
+                                        day.count > 0 && (
+                                          <div style={{
+                                            position: "absolute",
+                                            bottom: 4,
+                                            left: 0,
+                                            right: 0,
+                                            textAlign: "center",
+                                            fontSize: 13,
+                                            fontWeight: 700,
+                                            color: day.count > 30 ? C.wilted : C.muted,
+                                            textShadow: "0 1px 2px rgba(0,0,0,0.3)",
+                                            zIndex: 2,
+                                          }}>
+                                            {day.count}
+                                          </div>
+                                        )
+                                      )}
+                                    </div>
+
+                                    {/* 下方标注 */}
+                                    <div style={{ fontSize: 10, color: C.muted, textAlign: "center", lineHeight: 1.3 }}>
+                                      {isToday ? (
+                                        totalToday > 0 ? `${day.revived}+${day.pending}` : "-"
+                                      ) : (
+                                        day.count > 0 ? `${day.count}朵` : ""
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* 图例 */}
+                            <div style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "10px 14px",
+                              borderBottom: `1px solid ${C.border}`,  // ← 修复：cardBorder → C.border
+                              position: 'relative',
+                            }}>
+                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.alive, borderRadius: 2, marginRight: 4 }} />已复活</span>
+                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.urgent, borderRadius: 2, marginRight: 4 }} />待复活</span>
+                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.wilted, borderRadius: 2, marginRight: 4 }} />超额</span>
+                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#e8d8a0", borderRadius: 2, marginRight: 4 }} />未来≤30</span>
+                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#e8a0a0", borderRadius: 2, marginRight: 4 }} />未来大于30</span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ========== 导入面板 ========== */}
+              <div style={{
+                maxHeight: showImport ? 600 : 0,
+                opacity: showImport ? 1 : 0,
+                overflow: "hidden",
+                transition: "max-height 0.35s ease-out, opacity 0.25s ease-out, padding 0.3s, margin-bottom 0.3s",
+                marginBottom: showImport ? 10 : 0,
+                background: showImport ? C.modalBg : "transparent",
+                border: showImport ? `1px solid ${C.accentDim}` : "1px solid transparent",
+                borderRadius: 10,
+                padding: showImport ? 14 : 0,
+              }}>
+                {showImport && (
+                  <div>
+                    {/* 标题 + 说明按钮 */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                      <div style={{ fontSize: 14, color: C.accent, fontWeight: 600 }}>
+                        粘贴花朵记录
+                      </div>
+                      <button
+                        onClick={() => setShowImportHelp(v => !v)}
+                        style={{
+                          background: "transparent",
+                          border: `1px solid ${C.accent}40`,
+                          borderRadius: 6,
+                          padding: "2px 10px",
+                          fontSize: 12,
+                          color: C.accent,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {showImportHelp ? "收起说明 ▲" : "查看格式说明 ▼"}
+                      </button>
+                    </div>
+
+                    {/* 折叠的详细说明 */}
+                    <div style={{
+                      maxHeight: showImportHelp ? 400 : 0,
+                      opacity: showImportHelp ? 1 : 0,
+                      overflow: "hidden",
+                      transition: "max-height 0.3s ease-out, opacity 0.2s ease-out, margin-bottom 0.3s",
+                      marginBottom: showImportHelp ? 10 : 0,
+                    }}>
+                      <div style={{
+                        fontSize: 12,
+                        color: C.muted,
+                        lineHeight: 1.7,
+                        padding: "10px 12px",
+                        background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                        borderRadius: 8,
+                      }}>
+                        <div style={{ marginBottom: 8 }}>
+                          <strong style={{ color: C.text }}>格式1（无剩余时长）：</strong>
+                          <div>每行 = 若干 <code style={{ color: C.text, background: isDark ? "#ffffff10" : "#00000008", padding: "1px 4px", borderRadius: 3 }}>花名+数量</code> + <code style={{ color: C.text, background: isDark ? "#ffffff10" : "#00000008", padding: "1px 4px", borderRadius: 3 }}>账号ID</code>（纯数字≥4位）</div>
+                        </div>
+                        <div>
+                          <strong style={{ color: C.text }}>格式2（带剩余时长）：</strong>
+                          <div>花行 = <code style={{ color: C.text, background: isDark ? "#ffffff10" : "#00000008", padding: "1px 4px", borderRadius: 3 }}>花名+数量 小时 分钟</code></div>
+                          <div>账号ID单独一行（纯数字≥4位）</div>
+                          <div style={{ marginTop: 4, fontSize: 11, color: C.urgent }}>⚠️ 账号ID 必须是纯数字，写成文字会被整行丢弃</div>
+                          <div style={{ marginTop: 2, fontSize: 11, color: C.muted }}>💡 分钟超过 60 会自动进位，不必手动换算</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 两栏输入 */}
+                    <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                      {/* 格式1 */}
+                      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>
+                          格式1（无剩余时长）
+                        </div>
+                        <textarea
+                          value={importText}
+                          onChange={e => { setImportText(e.target.value); setImportError(""); }}
+                          rows={6}
+                          style={{
+                            width: "100%", boxSizing: "border-box",
+                            background: C.inputBg, border: `1px solid ${C.border}`,
+                            borderRadius: 6, padding: "8px 10px",
+                            color: C.text, fontSize: 13, fontFamily: "monospace",
+                            resize: "vertical", outline: "none",
+                            lineHeight: 1.5,
+                          }}
+                          placeholder={"【示例】\n黑色罗布麻30 1024\n黑色荼蘼2 紫色雪莲1 2048"}
+                        />
+                      </div>
+
+                      {/* 格式2 */}
+                      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>
+                          格式2（带剩余时长）
+                        </div>
+                        <textarea
+                          value={importText2}
+                          onChange={e => { setImportText2(e.target.value); setImportError(""); }}
+                          rows={6}
+                          style={{
+                            width: "100%", boxSizing: "border-box",
+                            background: C.inputBg, border: `1px solid ${C.border}`,
+                            borderRadius: 6, padding: "8px 10px",
+                            color: C.text, fontSize: 13, fontFamily: "monospace",
+                            resize: "vertical", outline: "none",
+                            lineHeight: 1.5,
+                          }}
+                          placeholder={"【示例】\n黑色罗布麻30 146 14\n1024\n黑色荼蘼2 20 12\n紫色雪莲1 44 2\n2048"}
+                        />
+                      </div>
+                    </div>
+
+                    {importError && <div style={{ fontSize: 13, color: C.wilted, marginBottom: 8, whiteSpace: "pre-line" }}>{importError}</div>}
+                    <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                      <button onClick={doImport} style={btn(C.alive)}>导入</button>
+                      <button onClick={() => { setShowImport(false); setImportText(""); setImportText2(""); setImportError(""); }} style={btn(C.muted)}>取消</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>  {/* ← 固定顶部包裹层闭合 */}
+
+            {/* ========== 空状态提示 ========== */}
+            {filteredSorted.length === 0 && !showImport && !searchText.trim() && (
+              <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 15 }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>🌱</div>
+                还没有记录，点击「+ 添加账号」开始追踪
+              </div>
+            )}
+
+            {/* ========== 账号卡片列表 ========== */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {filteredSorted.map(account => {
+                const statuses = account.flowers.map(f => status(f));
+                const allWilted = statuses.every(s => s === "wilted");
+                const someWilted = statuses.some(s => s === "wilted");
+                const someUrgent = statuses.some(s => s === "urgent");
+                const allUnknown = statuses.every(s => s === "unknown");
+
+                const cardBg = allWilted ? C.cardWilted : someWilted ? C.cardUrgent : C.card;
+                const cardBorder = allWilted ? C.borderWilted : someWilted ? C.borderUrgent : C.border;
+
+                return (
+                  // ========== 【修改】账号卡片添加 onClick 阻止冒泡，保持置顶状态 ==========
+                  <div
+                    key={account.id}
+                    data-account-id={account.accountId}
+                    className="account-card"
+                    style={{
+                      background: cardBg,
+                      border: `1px solid ${cardBorder}`,
+                      borderRadius: 12,
+                      overflow: "hidden",
+                      boxShadow: isDark
+                        ? "0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3)"
+                        : "0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)",
+                      transition: "transform 0.2s, box-shadow 0.2s",
+                    }}
+                    onClick={e => e.stopPropagation()}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                      e.currentTarget.style.boxShadow = isDark
+                        ? "0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3)"
+                        : "0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08)";
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.boxShadow = isDark
+                        ? "0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3)"
+                        : "0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)";
+                    }}
+                  >
+                    {/* ========== 账号卡片头部 ========== */}
+                    <div
+                      style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "10px 14px", borderBottom: `1px solid ${cardBorder}`,
+                      }}
+                      onDoubleClick={() => {
+                        setAccountReminder(account.accountId);
+                      }}
+                      title={accountReminders.has(account.accountId)
+                        ? "双击空白处取消枯萎提醒 · 点花朵的 ⚙ 可置顶本账号"
+                        : "双击空白处开启枯萎提醒 · 点花朵的 ⚙ 可置顶本账号"}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        {/* ========== 可点击复制的账号ID ========== */}
+                        {editingFlower && editingFlower.accountId === account.accountId && editingFlower.flowerId === '__account__' ? (
+                          <input
+                            autoFocus
+                            value={editingFlower.text}
+                            onChange={e => setEditingFlower({ ...editingFlower, text: e.target.value })}
+                            onBlur={() => saveAccountRename(account.accountId)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveAccountRename(account.accountId); if (e.key === 'Escape') setEditingFlower(null); }}
+                            style={{
+                              fontSize: 14, fontWeight: 700, color: C.accent,
+                              background: C.inputBg, border: `1px solid ${C.accent}`,
+                              borderRadius: 6, padding: "3px 10px", fontFamily: "inherit",
+                              width: 120, outline: "none",
+                            }}
+                          />
+                        ) : (
+                          <button
+                            onClick={() => {
+                              if (window.__longPressTriggered) {
+                                window.__longPressTriggered = false;
+                                return;
+                              }
+                              copyText(account.accountId, account.id);
+                            }}
+                            onMouseDown={(e) => {
+                              window.__longPressTimer = setTimeout(() => {
+                                window.__longPressTriggered = true;
+                                setEditingFlower({ accountId: account.accountId, flowerId: '__account__', text: account.accountId });
+                              }, 600);
+                            }}
+                            onMouseUp={() => {
+                              if (window.__longPressTimer) {
+                                clearTimeout(window.__longPressTimer);
+                                window.__longPressTimer = null;
+                              }
+                            }}
+                            onMouseLeave={() => {
+                              if (window.__longPressTimer) {
+                                clearTimeout(window.__longPressTimer);
+                                window.__longPressTimer = null;
+                              }
+                            }}
+                            onTouchStart={(e) => {
+                              window.__longPressTimer = setTimeout(() => {
+                                window.__longPressTriggered = true;
+                                setEditingFlower({ accountId: account.accountId, flowerId: '__account__', text: account.accountId });
+                              }, 600);
+                            }}
+                            onTouchEnd={() => {
+                              if (window.__longPressTimer) {
+                                clearTimeout(window.__longPressTimer);
+                                window.__longPressTimer = null;
+                              }
+                            }}
+                            onContextMenu={(e) => {
+                              e.preventDefault();
+                              return false;
+                            }}
+                            style={{
+                              fontSize: 14, fontWeight: 700, color: C.accent,
+                              background: C.accentDim + "30", padding: "3px 10px", borderRadius: 6,
+                              border: "none", cursor: "pointer", fontFamily: "inherit",
+                              display: "flex", alignItems: "center", gap: 4,
+                              userSelect: "none",
+                              WebkitUserSelect: "none",
+                            }}
+                            title="单击复制，长按编辑"
+                          >
+                            #{account.accountId}
+                            <span style={{ fontSize: 11, opacity: 0.7 }}>
+                              {copiedId === account.id ? "✓" : "📋"}
+                            </span>
+                          </button>
+                        )}
+                        {allWilted && <span style={pill(C.wilted)}>全部枯萎</span>}
+                        {!allWilted && someWilted && <span style={pill(C.urgent)}>部分枯萎</span>}
+                        {!someWilted && someUrgent && <span style={pill(C.urgent)}>即将枯萎</span>}
+                        {allUnknown && <span style={pill(C.unknown)}>未记录</span>}
+                        {accountReminders.has(account.accountId) && (
+                          <span style={{ fontSize: 13, marginLeft: 4 }}>🔔</span>
+                        )}
+                        {pinnedAccountId === account.accountId && (
+                          <button
+                            onClick={e => { e.stopPropagation(); setPinnedAccountId(null); }}
+                            title="已置顶，点击取消"
+                            style={{
+                              fontSize: 12, color: C.accent, cursor: "pointer",
+                              background: C.accentDim + "30",
+                              border: `1px solid ${C.accent}40`,
+                              borderRadius: 10, padding: "1px 8px",
+                              fontFamily: "inherit", lineHeight: 1.6,
+                            }}
+                          >📌 已置顶</button>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
+                        {/* 折叠按钮 - 悬停显示 */}
+                        <button
+                          className="collapse-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const newSet = new Set(collapsedAccounts);
+                            if (newSet.has(account.accountId)) {
+                              newSet.delete(account.accountId);
+                            } else {
+                              newSet.add(account.accountId);
+                            }
+                            setCollapsedAccounts(newSet);
+                          }}
+                          style={{
+                            background: "transparent",
+                            color: C.muted,
+                            border: `1px solid ${C.muted}40`,
+                            borderRadius: 5,
+                            padding: "3px 10px",
+                            fontSize: 13,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            opacity: 0,
+                            pointerEvents: "none",
+                            transition: "opacity 0.2s",
+                          }}
+                          title={collapsedAccounts.has(account.accountId) ? "移出折叠" : "折叠"}
+                        >
+                          {collapsedAccounts.has(account.accountId) ? "▲" : "▼"}
+                        </button>
+
+                        <button onClick={() => reviveAll(account.accountId)} style={tinyBtn(C.alive)}>🌿 全部复活</button>
+
+                        {confirmDel === account.accountId
+                          ? <>
+                            <button onClick={() => deleteAccount(account.accountId)} style={tinyBtn(C.wilted)}>确认删除</button>
+                            <button onClick={() => setConfirmDel(null)} style={{ background: "transparent", color: C.muted, border: "0.5px solid #cccccc", borderRadius: 5, padding: "3px 10px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>取消</button>
+                          </>
+                          : <button onClick={() => setConfirmDel(account.accountId)} style={{ background: "transparent", color: C.muted, border: "0.5px solid #cccccc", borderRadius: 5, padding: "3px 10px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>删除账号</button>
+                        }
+                      </div>
+                    </div>
+
+                    {/* ========== 花朵行列表 ========== */}
+                    <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
+                      {(() => {
+                        const sortedFlowers = [...account.flowers].sort((a, b) => {
+                          const ra = remMs(a);
+                          const rb = remMs(b);
+                          if (ra === null && rb === null) return 0;
+                          if (ra === null) return 1;
+                          if (rb === null) return -1;
+                          return ra - rb;
+                        });
+                        const totalKinds = sortedFlowers.length;
+                        const needsFold = totalKinds > 8;
+                        const isExpanded = expandedAccounts.has(account.accountId);
+                        const displayFlowers = needsFold && !isExpanded ? sortedFlowers.slice(0, 8) : sortedFlowers;
+                        const foldedCount = totalKinds - 8;
+
+                        return (
+                          <>
+                            {displayFlowers.map(f => {
+                              const st = status(f);
+                              const rem = remMs(f);
+                              const stColor = { alive: C.alive, urgent: C.urgent, wilted: C.wilted, unknown: C.unknown }[st];
+                              const rowBg = { alive: C.rowAlive, urgent: C.rowUrgent, wilted: C.rowWilted, unknown: C.rowUnknown }[st];
+
+                              return (
+                                <div
+                                  key={f.id}
+                                  className="flower-row"
+                                  style={{
+                                    display: "flex", alignItems: "center",
+                                    padding: "10px 12px", borderRadius: 8, background: rowBg,
+                                    gap: 10, position: "relative",
+                                  }}
+                                >
+                                  <div className={
+                                    st === "wilted" ? "status-dot-wilted" :
+                                      st === "urgent" ? "status-dot-urgent" :
+                                        st === "alive" ? "status-dot-alive" : ""
+                                  } style={{
+                                    width: 9,
+                                    height: 9,
+                                    borderRadius: "50%",
+                                    background: stColor,
+                                    flexShrink: 0,
+                                    color: stColor,
+                                  }} />
+
+                                  {/* ========== 花名 + 数量 + 删除按钮 ========== */}
+                                  <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+                                    {editingFlower && editingFlower.flowerId === f.id ? (
+                                      <input
+                                        autoFocus
+                                        value={editingFlower.text}
+                                        onChange={e => setEditingFlower({ ...editingFlower, text: e.target.value })}
+                                        onBlur={() => saveFlowerRename(account.accountId, f.id)}
+                                        onKeyDown={e => { if (e.key === 'Enter') saveFlowerRename(account.accountId, f.id); if (e.key === 'Escape') setEditingFlower(null); }}
+                                        style={{
+                                          fontSize: 15, fontWeight: 600, color: C.text,
+                                          background: C.inputBg, border: `1px solid ${C.accent}`,
+                                          borderRadius: 4, padding: "2px 6px", fontFamily: "inherit",
+                                          width: 120, outline: "none",
+                                        }}
+                                      />
+                                    ) : (
+                                      <span
+                                        style={{ fontSize: 15, fontWeight: 600, color: C.text, cursor: "pointer" }}
+                                        onDoubleClick={() => setEditingFlower({ accountId: account.accountId, flowerId: f.id, text: f.name + f.count })}
+                                        title="双击重命名"
+                                      >
+                                        {f.name}
+                                        <span style={{ fontSize: 13, color: C.muted, marginLeft: 6, fontWeight: 400 }}>×{f.count}</span>
+                                      </span>
+                                    )}
+                                    <button
+                                      className="del-btn"
+                                      onClick={() => deleteFlower(account.accountId, f.id)}
+                                      style={{
+                                        width: 22, height: 22, borderRadius: "50%",
+                                        background: C.wilted + "15",
+                                        color: C.wilted,
+                                        border: `1px solid ${C.wilted}30`,
+                                        fontSize: 11,
+                                        cursor: "pointer",
+                                        display: "flex", alignItems: "center", justifyContent: "center",
+                                        flexShrink: 0,
+                                        opacity: 0,
+                                        pointerEvents: "none",
+                                        transition: "opacity 0.2s",
+                                        marginLeft: 4,
+                                      }}
+                                      title="删除此花"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+
+                                  <div style={{ textAlign: "right", marginRight: 6, flexShrink: 0 }}>
+                                    <div style={{ fontSize: 14, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
+                                      {rem === null ? (
+                                        <span style={{ color: stColor }}>未记录</span>
+                                      ) : rem <= 0 ? (
+                                        <span style={{ color: stColor }}>已枯萎 <AnimatedNumber value={fmtRem(rem)} color={stColor} /></span>
+                                      ) : (
+                                        <AnimatedNumber value={fmtRem(rem)} color={stColor} />
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: C.muted }}>
+                                      {rem !== null && rem > 0 && `${fmtDate(f.revivalTime + f.durationMs)} 枯萎 `}
+                                    </div>
+                                  </div>
+
+                                  <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                                    <button onClick={() => reviveOne(account.accountId, f.id)} style={tinyBtn(C.alive)}>复活</button>
+                                    <button onClick={() => openModal(account.accountId, f.id, f)} style={{ background: "transparent", color: C.muted, border: "0.5px solid #cccccc", borderRadius: 5, padding: "3px 10px", fontSize: 13, cursor: "pointer", fontFamily: "inherit" }} title="修改时间/时长">⚙</button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    {/* ========== 花朵列表底部：添加花按钮 + 折叠/展开按钮 ========== */}
+                    <div style={{ padding: "6px 12px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      {/* 左侧：折叠/展开按钮（仅当种类超过8时显示） */}
+                      {account.flowers.length > 8 && (
+                        <button
+                          onClick={() => {
+                            const newSet = new Set(expandedAccounts);
+                            if (newSet.has(account.accountId)) {
+                              newSet.delete(account.accountId);
+                            } else {
+                              newSet.add(account.accountId);
+                            }
+                            setExpandedAccounts(newSet);
+                          }}
+                          style={{
+                            fontSize: 12,
+                            color: C.accent,
+                            background: "transparent",
+                            border: `1px solid ${C.accent}40`,
+                            borderRadius: 6,
+                            padding: "4px 12px",
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
+                            transition: "all 0.2s",
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = C.accent + "15"; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                        >
+                          <span style={{
+                            display: "inline-block",
+                            transform: expandedAccounts.has(account.accountId) ? "rotate(180deg)" : "rotate(0deg)",
+                            transition: "transform 0.2s",
+                          }}>▼</span>
+                          {expandedAccounts.has(account.accountId) ? `收起 (${account.flowers.length}种)` : `展开 (${account.flowers.length - 8}种)`}
+                        </button>
+                      )}
+                      {/* 占位，保持右侧对齐 */}
+                      {account.flowers.length <= 8 && <div />}
+                      <button
+                        onClick={() => openAddModal(account.accountId)}
+                        style={{
+                          fontSize: 12,
+                          color: C.accent,
+                          background: "transparent",
+                          border: `1px dashed ${C.accent}40`,
+                          borderRadius: 6,
+                          padding: "4px 12px",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          opacity: 0.7,
+                          transition: "opacity 0.2s",
+                        }}
+                        onMouseEnter={e => e.target.style.opacity = 1}
+                        onMouseLeave={e => e.target.style.opacity = 0.7}
+                      >
+                        + 添加花
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ========== 添加花朵弹窗 ========== */}
+            {/* ========== 【修改】弹窗 backdrop 添加 stopPropagation 防止取消置顶 ========== */}
+            {(addModal || addModalVisible) && (
+              <div
+                style={{
+                  position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+                  display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16,
+                  opacity: addModal && addModalAnimating ? 1 : 0,
+                  transition: addModal ? "opacity 0.2s ease-out" : "opacity 0.15s ease-in",
+                  pointerEvents: addModal ? "auto" : "none",
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div style={{
+                  background: isDark ? "rgba(24, 20, 31, 0.85)" : "rgba(255, 255, 255, 0.85)",
+                  backdropFilter: "blur(16px)",
+                  WebkitBackdropFilter: "blur(16px)",
+                  border: `1px solid ${isDark ? "rgba(180, 143, 208, 0.2)" : "rgba(123, 79, 160, 0.2)"}`,
+                  borderRadius: 12,
+                  padding: 20,
+                  width: "100%",
+                  maxWidth: 340,
+                  opacity: addModal && addModalAnimating ? 1 : 0,
+                  transform: addModal && addModalAnimating ? "scale(1) translateY(0)" : "scale(0.92) translateY(10px)",
+                  transition: addModal
+                    ? "opacity 0.25s ease-out, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)"
+                    : "opacity 0.15s ease-in, transform 0.15s ease-in",
+                }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.accent, marginBottom: 16 }}>添加花朵</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
+                    格式：<code style={{ color: C.text, background: isDark ? "#ffffff10" : "#00000008", padding: "1px 5px", borderRadius: 3 }}>花名数量</code>，多个用空格分隔
+                  </div>
+                  <input
+                    type="text"
+                    value={addModal ? addModal.text : ""}
+                    onChange={e => addModal && setAddModal({ ...addModal, text: e.target.value, error: "" })}
+                    placeholder="黑色荼蘼2 紫色雪莲1"
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      background: C.inputBg, border: `1px solid ${C.border}`,
+                      borderRadius: 6, padding: "8px 12px", color: C.text,
+                      fontSize: 14, fontFamily: "inherit", marginBottom: 6, outline: "none",
+                    }}
+                  />
+                  {addModal && addModal.error && <div style={{ fontSize: 12, color: C.wilted, marginBottom: 10 }}>{addModal.error}</div>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    <button onClick={doAddFlower} style={{ ...btn(C.alive), flex: 1 }}>添加</button>
+                    <button onClick={() => setAddModal(null)} style={{ ...btn(C.muted), flex: 1 }}>取消</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ========== 编辑弹窗 ========== */}
+            {/* ========== 【修改】弹窗 backdrop 添加 stopPropagation 防止取消置顶 ========== */}
+            {(modal || editModalVisible) && (
+              <div
+                style={{
+                  position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+                  display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16,
+                  opacity: modal && editModalAnimating ? 1 : 0,
+                  transition: modal ? "opacity 0.2s ease-out" : "opacity 0.15s ease-in",
+                  pointerEvents: modal ? "auto" : "none",
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div style={{
+                  background: isDark ? "rgba(24, 20, 31, 0.85)" : "rgba(255, 255, 255, 0.85)",
+                  backdropFilter: "blur(16px)",
+                  WebkitBackdropFilter: "blur(16px)",
+                  border: `1px solid ${isDark ? "rgba(180, 143, 208, 0.2)" : "rgba(123, 79, 160, 0.2)"}`,
+                  borderRadius: 12,
+                  padding: 20,
+                  width: "100%",
+                  maxWidth: 340,
+                  opacity: modal && editModalAnimating ? 1 : 0,
+                  transform: modal && editModalAnimating ? "scale(1) translateY(0)" : "scale(0.92) translateY(10px)",
+                  transition: modal
+                    ? "opacity 0.25s ease-out, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1)"
+                    : "opacity 0.15s ease-in, transform 0.15s ease-in",
+                }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.accent, marginBottom: 16 }}>修改倒计时设置</div>
+
+                  <label style={{ fontSize: 13, color: C.muted, display: "block", marginBottom: 5 }}>复活时间（可手动填写过去时间）</label>
+                  <input
+                    type="datetime-local"
+                    value={modal ? modal.revivalTimeStr : ""}
+                    onChange={e => {
+                      if (!modal) return;
+                      const newStr = e.target.value;
+                      const rt = newStr ? new Date(newStr).getTime() : null;
+                      if (rt !== null) {
+                        const remainingHours = calcRemainingFromRevivalTime(rt, modal.totalDurationMs);
+                        setModal({ ...modal, revivalTimeStr: newStr, hours: String(Math.max(0, Math.round(remainingHours * 10) / 10)) });
+                      } else {
+                        setModal({ ...modal, revivalTimeStr: newStr });
+                      }
+                    }}
+                    style={{
+                      width: "100%", boxSizing: "border-box",
+                      background: C.inputBg, border: `1px solid ${C.border}`,
+                      borderRadius: 6, padding: "8px 12px", color: C.text,
+                      fontSize: 14, fontFamily: "inherit", marginBottom: 14, outline: "none",
+                    }}
+                  />
+
+                  <label style={{ fontSize: 13, color: C.muted, display: "block", marginBottom: 5 }}>
+                    存活时长（支持 3.5 或 3 30）
+                  </label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <input
+                      type="text"  // ← 改成 text，支持空格
+                      value={modal ? modal.hours : ""}
+                      onChange={e => {
+                        if (!modal) return;
+                        const inputValue = e.target.value;
+
+                        // 解析输入：支持 "3.5" 或 "3 30"
+                        let totalHours = null;
+
+                        if (inputValue.includes(' ')) {
+                          // 格式： "3 30" → 3小时30分钟
+                          const parts = inputValue.trim().split(/\s+/);
+                          if (parts.length === 2) {
+                            const hours = parseFloat(parts[0]);
+                            const minutes = parseFloat(parts[1]);
+                            if (!isNaN(hours) && !isNaN(minutes) && hours >= 0 && minutes >= 0) {
+                              totalHours = hours + (minutes / 60);
+                            }
+                          }
+                        } else {
+                          // 格式： "3.5" → 3.5小时
+                          const h = parseFloat(inputValue);
+                          if (!isNaN(h) && h >= 0) {
+                            totalHours = h;
+                          }
+                        }
+
+                        // 更新显示值（保留用户输入的原始格式）
+                        setModal({ ...modal, hours: inputValue });
+
+                        // 如果解析成功，联动更新复活时间
+                        if (totalHours !== null) {
+                          const revivalTime = calcRevivalTimeFromRemaining(totalHours, modal.totalDurationMs);
+                          setModal({ ...modal, hours: inputValue, revivalTimeStr: toDatetimeLocal(revivalTime) });
+                        }
+                      }}
+                      placeholder="3.5 或 3 30"
+                      style={{
+                        flex: 1,
+                        background: C.inputBg,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                        padding: "8px 12px",
+                        color: C.text,
+                        fontSize: 14,
+                        fontFamily: "inherit",
+                        outline: "none",
+                      }}
+                    />
+                    <span style={{ fontSize: 13, color: C.muted }}>小时</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: C.muted, marginBottom: 16 }}>
+                    支持 3.5（小时）或 3 30（3小时30分钟），默认 336h（14天）
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={saveModal} style={{ ...btn(C.alive), flex: 1 }}>保存</button>
+                    <button onClick={() => setModal(null)} style={{ ...btn(C.muted), flex: 1 }}>取消</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ========== 双色花分配弹窗 ========== */}
+            {dualColorModal && (
+              <div
+                style={{
+                  position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+                  display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16,
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div style={{
+                  background: isDark ? "rgba(24, 20, 31, 0.85)" : "rgba(255, 255, 255, 0.85)",
+                  backdropFilter: "blur(16px)",
+                  WebkitBackdropFilter: "blur(16px)",
+                  border: `1px solid ${isDark ? "rgba(180, 143, 208, 0.2)" : "rgba(123, 79, 160, 0.2)"}`,
+                  borderRadius: 12,
+                  padding: 20,
+                  width: "100%",
+                  maxWidth: 380,
+                }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.accent, marginBottom: 16 }}>
+                    {dualColorModal.mode === 'single'
+                      ? `分配 ${dualColorModal.flowerName}（${dualColorModal.count}棵）`
+                      : `分配双色花获得（共${dualColorModal.flowers.length}种）`}
+                  </div>
+
+                  {dualColorModal.mode === 'single' ? (
+                    // 单朵分配
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {dualColorModal.targets.map((target, idx) => (
+                        <div key={target} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontSize: 14, color: C.text, flex: 1 }}>{target}</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={dualColorModal.count}
+                            value={dualColorModal.allocations[idx]}
+                            onChange={e => {
+                              const val = parseInt(e.target.value) || 0;
+                              const newAllocations = [...dualColorModal.allocations];
+                              newAllocations[idx] = Math.max(0, Math.min(val, dualColorModal.count));
+                              setDualColorModal({ ...dualColorModal, allocations: newAllocations });
+                            }}
+                            style={{
+                              width: 60,
+                              background: C.inputBg,
+                              border: `1px solid ${C.border}`,
+                              borderRadius: 6,
+                              padding: "6px 8px",
+                              color: C.text,
+                              fontSize: 14,
+                              fontFamily: "inherit",
+                              textAlign: "center",
+                              outline: "none",
+                            }}
+                          />
+                          <span style={{ fontSize: 12, color: C.muted }}>/ {dualColorModal.count}</span>
+                        </div>
+                      ))}
+                      <div style={{
+                        fontSize: 12,
+                        color: C.muted,
+                        padding: "8px 0",
+                        borderTop: `1px solid ${C.border}`,
+                        marginTop: 4,
+                      }}>
+                        剩余 {dualColorModal.count - dualColorModal.allocations.reduce((a, b) => a + b, 0)} 棵自动归为其他颜色
+                      </div>
+                    </div>
+                  ) : (
+                    // 批量分配
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxHeight: 400, overflowY: "auto" }}>
+                      {dualColorModal.flowers.map((flower, fIdx) => (
+                        <div key={flower.id} style={{
+                          padding: 12,
+                          background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+                          borderRadius: 8,
+                        }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: C.text, marginBottom: 8 }}>
+                            {flower.name} ×{flower.count}
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {flower.rareTargets.map((target, tIdx) => (
+                              <div key={target} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <span style={{ fontSize: 13, color: C.text, flex: 1 }}>{target}</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={flower.count}
+                                  defaultValue={0}
+                                  onChange={e => {
+                                    const val = parseInt(e.target.value) || 0;
+                                    flower.rareTargetsAllocations = flower.rareTargetsAllocations || flower.rareTargets.map(() => 0);
+                                    flower.rareTargetsAllocations[tIdx] = Math.max(0, Math.min(val, flower.count));
+                                  }}
+                                  style={{
+                                    width: 60,
+                                    background: C.inputBg,
+                                    border: `1px solid ${C.border}`,
+                                    borderRadius: 6,
+                                    padding: "5px 8px",
+                                    color: C.text,
+                                    fontSize: 13,
+                                    fontFamily: "inherit",
+                                    textAlign: "center",
+                                    outline: "none",
+                                  }}
+                                />
+                                <span style={{ fontSize: 11, color: C.muted }}>/ {flower.count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                    <button
+                      onClick={() => {
+                        if (dualColorModal.mode === 'single') {
+                          const total = dualColorModal.allocations.reduce((a, b) => a + b, 0);
+                          if (total > dualColorModal.count) {
+                            alert(`分配总数不能超过 ${dualColorModal.count}`);
+                            return;
+                          }
+                          dualColorModal.onConfirm(dualColorModal.allocations);
+                        } else {
+                          const allAllocations = dualColorModal.flowers.map(f => ({
+                            targets: f.rareTargets,
+                            allocations: f.rareTargetsAllocations || f.rareTargets.map(() => 0),
+                          }));
+                          // 验证
+                          for (let i = 0; i < dualColorModal.flowers.length; i++) {
+                            const f = dualColorModal.flowers[i];
+                            const alloc = allAllocations[i].allocations;
+                            const total = alloc.reduce((a, b) => a + b, 0);
+                            if (total > f.count) {
+                              alert(`${f.name} 的分配总数不能超过 ${f.count}`);
+                              return;
+                            }
+                          }
+                          dualColorModal.onConfirm(allAllocations);
+                        }
+                      }}
+                      style={{ ...btn(C.alive), flex: 1 }}
+                    >
+                      确认分配
+                    </button>
+                    <button
+                      onClick={() => setDualColorModal(null)}
+                      style={{ ...btn(C.muted), flex: 1 }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Toast 通知区域 */}
+          <div style={{
+            position: "fixed", top: 20, right: 20,
+            zIndex: 9999, display: "flex", flexDirection: "column", gap: 8,
+            maxWidth: 320,
+          }}>
+            {toasts.map(toast => (
+              <div key={toast.id} style={{
+                background: isDark ? "rgba(24,20,31,0.95)" : "rgba(255,255,255,0.97)",
+                backdropFilter: "blur(16px)",
+                border: `1px solid ${C.wilted}60`,
+                borderLeft: `4px solid ${C.wilted}`,
+                borderRadius: 10,
+                padding: "12px 16px",
+                boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+                animation: "slideIn 0.3s cubic-bezier(0.34,1.56,0.64,1)",
+                position: "relative",
+              }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.wilted, marginBottom: 4 }}>
+                  {toast.title}
+                </div>
+                <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5 }}>{toast.body}</div>
+                <button onClick={() => setToasts(prev => prev.filter(t => t.id !== toast.id))}
+                  style={{ position: "absolute", top: 8, right: 10, background: "transparent",
+                    border: "none", color: C.muted, fontSize: 14, cursor: "pointer" }}>✕</button>
+              </div>
+            ))}
+          </div>
+
+          {/* ========== 收集进度悬浮按钮 ========== */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowCollection(!showCollection);
+            }}
+            style={{
+              position: 'fixed',
+              bottom: showBackToTop ? 80 : 24,
+              right: 24,
+              width: 48,
+              height: 48,
+              borderRadius: '50%',
+              background: isDark
+                ? 'linear-gradient(135deg, rgba(180, 143, 208, 0.15) 0%, rgba(106, 64, 128, 0.25) 100%)'
+                : 'linear-gradient(135deg, rgba(180, 143, 208, 0.1) 0%, rgba(106, 64, 128, 0.2) 100%)',
+              backdropFilter: 'blur(12px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+              border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.4)'}`,
+              color: C.accent,
+              fontSize: 20,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: isDark
+                ? '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 1px rgba(180,143,208,0.1)'
+                : '0 8px 32px rgba(123,79,160,0.15), inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 1px rgba(180,143,208,0.08)',
+              zIndex: 100,
+              transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+            }}
+            title="收集进度"
+          >
+            📊
+          </button>
+
+          {/* ========== 收集进度面板 ========== */}
+          {(showCollection || collectionVisible) && (
+            <div style={{
+              position: 'fixed',
+              bottom: showBackToTop ? 136 : 80,
+              right: 24,
+              width: 340,
+              maxHeight: '70vh',
+              opacity: showCollection && collectionAnimating ? 1 : 0,
+              transform: showCollection && collectionAnimating
+                ? "scale(1) translateY(0)"
+                : "scale(0.92) translateY(10px)",
+              transition: showCollection
+                ? "opacity 0.25s ease-out, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)"
+                : "opacity 0.2s ease-in, transform 0.2s ease-in",
+              display: 'flex',
+              flexDirection: 'column',
+              background: isDark ? "rgba(24, 20, 31, 0.85)" : "rgba(255, 255, 255, 0.85)",
+              backdropFilter: "blur(16px)",
+              WebkitBackdropFilter: "blur(16px)",
+              border: `1px solid ${isDark ? "rgba(180, 143, 208, 0.2)" : "rgba(123, 79, 160, 0.2)"}`,
+              borderRadius: 12,
+              zIndex: 99,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+              overflow: 'hidden',
+            }}>
+              {/* 固定头部 */}
+              <div style={{
+                padding: "12px 16px",
+                borderBottom: `1px solid ${C.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+              }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: C.accent }}>📊 收集进度</span>
+                <button
+                  onClick={() => setShowCollection(false)}
+                  style={{ background: "transparent", border: "none", color: C.muted, fontSize: 16, cursor: "pointer" }}
+                >✕</button>
+              </div>
+
+              {/* 搜索排序操作栏（一行） */}
+              <div style={{
+                padding: "10px 16px",
+                borderBottom: `1px solid ${C.border}`,
+                display: "flex",
+                gap: 6,
+                flexShrink: 0,
+                alignItems: "center",
+              }}>
+                {/* 搜索框（固定宽度） */}
+                <div style={{ position: "relative", width: 140, flexShrink: 0 }}>
+                  <span style={{
+                    position: "absolute",
+                    left: 8,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    fontSize: 12,
+                    color: C.muted,
+                  }}>🔍</span>
+                  <input
+                    type="text"
+                    value={collectionSearch}
+                    onChange={e => setCollectionSearch(e.target.value)}
+                    placeholder="搜索..."
+                    style={{
+                      width: "100%",
+                      background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                      border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+                      borderRadius: 16,
+                      padding: "4px 22px 4px 26px",
+                      color: C.text,
+                      fontSize: 12,
+                      fontFamily: "inherit",
+                      outline: "none",
+                    }}
+                  />
+                  {collectionSearch && (
+                    <button
+                      onClick={() => setCollectionSearch("")}
+                      style={{
+                        position: "absolute",
+                        right: 6,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        background: "transparent",
+                        border: "none",
+                        color: C.muted,
+                        fontSize: 10,
+                        cursor: "pointer",
+                        padding: "2px 4px",
+                      }}
+                    >✕</button>
+                  )}
+                </div>
+
+                {/* 排序下拉 */}
+                <select
+                  value={collectionSort}
+                  onChange={e => setCollectionSort(e.target.value)}
+                  style={{
+                    background: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+                    border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+                    borderRadius: 16,
+                    padding: "4px 6px",
+                    color: C.text,
+                    fontSize: 12,
+                    fontFamily: "inherit",
+                    outline: "none",
+                    cursor: "pointer",
+                    flex: 1,
+                    minWidth: 0,
+                  }}
+                >
+                  {[
+                    ["progress", "进度从低到高"],
+                    ["progressDesc", "进度从高到低"],
+                    ["name", "首字母 A-Z"],
+                    ["nameDesc", "首字母 Z-A"],
+                    ["earliest", "预计最早完成"],
+                    ["latest", "预计最晚完成"],
+                  ].map(([val, label]) => (
+                    <option
+                      key={val}
+                      value={val}
+                      style={{
+                        background: isDark ? C.modalBg : "#ffffff",
+                        color: isDark ? C.text : "#1a1a1a",
+                      }}
+                    >
+                      {label}
+                    </option>
+                  ))}
+                </select>
+
+                {/* 添加按钮（图标） */}
+                <button
+                  onClick={() => setCollectionAddModal({})}
+                  title="添加目标花"
+                  style={{
+                    background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                    border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+                    borderRadius: 16,
+                    color: C.accent,
+                    fontSize: 16,
+                    cursor: "pointer",
+                    padding: "3px 8px",
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                >+</button>
+
+                {/* 删除按钮（图标） */}
+                <button
+                  onClick={() => {
+                    const selected = Object.entries(collectionGoals).filter(([,g]) => g._selected);
+                    if (selected.length === 0) {
+                      alert("请先勾选要删除的目标");
+                      return;
+                    }
+                    if (confirm(`确定删除选中的 ${selected.length} 个收集目标？`)) {
+                      selected.forEach(([name]) => removeCollectionGoal(name));
+                    }
+                  }}
+                  title="删除选中"
+                  style={{
+                    background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.05)",
+                    border: `1px solid ${isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)"}`,
+                    borderRadius: 16,
+                    color: C.wilted,
+                    fontSize: 14,
+                    cursor: "pointer",
+                    padding: "3px 8px",
+                    lineHeight: 1,
+                    flexShrink: 0,
+                  }}
+                >🗑</button>
+              </div>
+
+              {/* 可滚动内容区 */}
+              <div className={isDark ? "dark-scrollbar" : "light-scrollbar"} style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: "10px 16px 16px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}>
+                {(() => {
+                  // 搜索过滤
+                  let entries = Object.entries(collectionGoals);
+                  if (collectionSearch.trim()) {
+                    const q = collectionSearch.trim().toLowerCase();
+                    entries = entries.filter(([name]) => name.toLowerCase().includes(q));
+                  }
+
+                  // 预计算：每个花的进度、预计天数、统计（避免排序和渲染时重复计算）
+                  const computed = new Map();
+                  entries.forEach(([name, goal]) => {
+                    const progress = goal.needed > 0 ? goal.owned / goal.needed : 0;
+                    const estimatedDays = goal.needed > 0 ? getEstimatedDays(name, goal.needed, goal.owned) : null;
+                    const stats = getAccountFlowerStats(name);
+                    computed.set(name, { progress, estimatedDays, stats });
+                  });
+
+                  // 排序
+                  entries.sort(([nameA, a], [nameB, b]) => {
+                    const ca = computed.get(nameA);
+                    const cb = computed.get(nameB);
+
+                    switch (collectionSort) {
+                      case "progress":
+                        return ca.progress - cb.progress;
+                      case "progressDesc":
+                        return cb.progress - ca.progress;
+                      case "name":
+                        return nameA.localeCompare(nameB, "zh-CN");
+                      case "nameDesc":
+                        return nameB.localeCompare(nameA, "zh-CN");
+                      case "earliest":
+                        if (ca.estimatedDays === null && cb.estimatedDays === null) return 0;
+                        if (ca.estimatedDays === null) return 1;
+                        if (cb.estimatedDays === null) return -1;
+                        return ca.estimatedDays - cb.estimatedDays;
+                      case "latest":
+                        if (ca.estimatedDays === null && cb.estimatedDays === null) return 0;
+                        if (ca.estimatedDays === null) return 1;
+                        if (cb.estimatedDays === null) return -1;
+                        return cb.estimatedDays - ca.estimatedDays;
+                      default:
+                        return 0;
+                    }
+                  });
+
+                  if (entries.length === 0) {
+                    return (
+                      <div style={{ textAlign: "center", color: C.muted, fontSize: 13, padding: "20px 0" }}>
+                        {Object.entries(collectionGoals).length === 0
+                          ? "暂无收集目标，点击上方添加"
+                          : "没有匹配的目标花"}
+                      </div>
+                    );
+                  }
+
+                  return entries.map(([flowerName, goal]) => {
+                    const c = computed.get(flowerName);
+                    const progress = Math.min(c.progress, 1);
+                    const remaining = goal.needed - goal.owned;
+                    const estimatedDays = c.estimatedDays;
+                    const isCompleted = goal.needed > 0 && goal.owned >= goal.needed;
+                    const hasStats = c.stats.single > 0 || c.stats.dual > 0;
+
+                    return (
+                      <div key={flowerName} style={{
+                        padding: 10,
+                        background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+                        borderRadius: 8,
+                        flexShrink: 0,
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{flowerName}</span>
+                            {hasStats && (
+                              <span style={{
+                                fontSize: 11,
+                                color: C.muted,
+                                background: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+                                padding: "1px 8px",
+                                borderRadius: 10,
+                              }}>
+                                {c.stats.single}+{c.stats.dual}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <button
+                              onClick={() => {
+                                setCollectionAddModal({
+                                  flowerName: flowerName,
+                                  originalName: flowerName,
+                                  needed: goal.needed,
+                                  owned: goal.owned,
+                                  isEdit: true,
+                                });
+                              }}
+                              style={{ background: "transparent", border: "none", color: C.muted, fontSize: 12, cursor: "pointer" }}
+                              title="编辑"
+                            >✏️</button>
+                            <input
+                              type="checkbox"
+                              onChange={e => {
+                                setCollectionGoals(prev => ({
+                                  ...prev,
+                                  [flowerName]: { ...prev[flowerName], _selected: e.target.checked },
+                                }));
+                              }}
+                              style={{ cursor: "pointer", width: 16, height: 16 }}
+                              title="勾选以批量删除"
+                            />
+                          </div>
+                        </div>
+
+                        {/* 进度条 */}
+                        <div style={{
+                          height: 6,
+                          background: isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.08)",
+                          borderRadius: 3,
+                          overflow: "hidden",
+                          marginBottom: 6,
+                        }}>
+                          <div style={{
+                            height: "100%",
+                            width: `${progress * 100}%`,
+                            background: goal.needed === 0
+                              ? C.muted
+                              : isCompleted
+                                ? C.alive
+                                : progress > 0.5
+                                  ? C.urgent
+                                  : C.wilted,
+                            borderRadius: 3,
+                            transition: "width 0.3s ease",
+                          }} />
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                          <span style={{ color: C.muted }}>
+                            {goal.owned} / {goal.needed}
+                            {goal.needed === 0
+                              ? "（未设置目标）"
+                              : isCompleted
+                                ? " ✓ 已完成"
+                                : `（还缺 ${remaining}）`}
+                          </span>
+                          <span style={{ color: goal.needed === 0 ? C.muted : (isCompleted ? C.alive : C.urgent) }}>
+                            {goal.needed === 0
+                              ? "点击编辑设置目标"
+                              : isCompleted
+                                ? "已完成"
+                                : estimatedDays === null
+                                  ? "暂无数据"
+                                  : estimatedDays === 0
+                                    ? "即将完成"
+                                    : `预计 ${estimatedDays} 天`}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+          )}
+
+          {/* ========== 添加目标花弹窗 ========== */}
+          {collectionAddModal && (
+            <div
+              style={{
+                position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+                display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200, padding: 16,
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div style={{
+                background: isDark ? "rgba(24, 20, 31, 0.85)" : "rgba(255, 255, 255, 0.85)",
+                backdropFilter: "blur(16px)",
+                WebkitBackdropFilter: "blur(16px)",
+                border: `1px solid ${isDark ? "rgba(180, 143, 208, 0.2)" : "rgba(123, 79, 160, 0.2)"}`,
+                borderRadius: 12,
+                padding: 20,
+                width: "100%",
+                maxWidth: 360,
+              }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.accent, marginBottom: 16 }}>
+                  {collectionAddModal.isEdit ? `编辑 ${collectionAddModal.flowerName}` : "添加收集目标"}
+                </div>
+
+                {/* 花名输入 */}
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 13, color: C.muted, display: "block", marginBottom: 4 }}>花名</label>
+                  <input
+                    type="text"
+                    value={collectionAddModal.flowerName || ""}
+                    onChange={e => {
+                      const val = e.target.value;
+                      const matches = RARE_FLOWERS.filter(f => f.includes(val));
+                      setCollectionAddModal({ ...collectionAddModal, flowerName: val, suggestions: val ? matches : [] });
+                    }}
+                    placeholder="输入花名，如：紫色昙花"
+                    style={{
+                      width: "100%",
+                      background: C.inputBg,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      color: C.text,
+                      fontSize: 14,
+                      fontFamily: "inherit",
+                      outline: "none",
+                    }}
+                  />
+                  {/* 智能提示 */}
+                  {collectionAddModal.suggestions && collectionAddModal.suggestions.length > 0 && (
+                    <div style={{
+                      maxHeight: 150,
+                      overflowY: "auto",
+                      background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+                      borderRadius: 6,
+                      marginTop: 4,
+                    }}>
+                      {collectionAddModal.suggestions.map(name => (
+                        <div
+                          key={name}
+                          onClick={() => setCollectionAddModal({ ...collectionAddModal, flowerName: name, suggestions: [] })}
+                          style={{
+                            padding: "8px 12px",
+                            fontSize: 13,
+                            color: C.text,
+                            cursor: "pointer",
+                            borderBottom: `1px solid ${C.border}`,
+                          }}
+                        >
+                          {name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 一键添加所有珍稀花 */}
+                <button
+                  onClick={() => {
+                    RARE_FLOWERS.forEach(name => {
+                      if (!collectionGoals[name]) {
+                        setCollectionGoal(name, 100, 0);  // 默认需要100朵
+                      }
+                    });
+                    setCollectionAddModal(null);
+                  }}
+                  style={{ ...btn(C.accentDim), width: "100%", marginBottom: 12, fontSize: 12 }}
+                >
+                  一键添加所有珍稀花（默认目标100朵）
+                </button>
+
+                {/* 需要总数 */}
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 13, color: C.muted, display: "block", marginBottom: 4 }}>需要总数</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={collectionAddModal.needed || ""}
+                    onChange={e => setCollectionAddModal({ ...collectionAddModal, needed: parseInt(e.target.value) || 0 })}
+                    placeholder="0"
+                    style={{
+                      width: "100%",
+                      background: C.inputBg,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      color: C.text,
+                      fontSize: 14,
+                      fontFamily: "inherit",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+
+                {/* 已有数量 */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 13, color: C.muted, display: "block", marginBottom: 4 }}>已有数量</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={collectionAddModal.owned || ""}
+                    onChange={e => setCollectionAddModal({ ...collectionAddModal, owned: parseInt(e.target.value) || 0 })}
+                    placeholder="0"
+                    style={{
+                      width: "100%",
+                      background: C.inputBg,
+                      border: `1px solid ${C.border}`,
+                      borderRadius: 8,
+                      padding: "10px 12px",
+                      color: C.text,
+                      fontSize: 14,
+                      fontFamily: "inherit",
+                      outline: "none",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => {
+                      const name = collectionAddModal.flowerName?.trim();
+                      const needed = collectionAddModal.needed || 0;
+                      const owned = collectionAddModal.owned || 0;
+                      if (!name) {
+                        alert("请输入花名");
+                        return;
+                      }
+                      // 编辑模式下如果花名变了，删除旧的花名
+                      if (collectionAddModal.isEdit && collectionAddModal.originalName && collectionAddModal.originalName !== name) {
+                        removeCollectionGoal(collectionAddModal.originalName);
+                      }
+                      setCollectionGoal(name, needed, owned);
+                      setCollectionAddModal(null);
+                    }}
+                    style={{ ...btn(C.alive), flex: 1 }}
+                  >
+                    {collectionAddModal.isEdit ? "确认修改" : "确认添加"}
+                  </button>
+                  <button
+                    onClick={() => setCollectionAddModal(null)}
+                    style={{ ...btn(C.muted), flex: 1 }}
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showBackup && (
+            <div
+              onClick={() => setShowBackup(false)}
+              style={{
+                position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                zIndex: 300, padding: 16,
+              }}
+            >
+              <div
+                onClick={e => e.stopPropagation()}
+                className={isDark ? "dark-scrollbar" : "light-scrollbar"}
+                style={{
+                  background: C.modalBg,
+                  border: `1px solid ${C.accentDim}`,
+                  borderRadius: 12,
+                  padding: 18,
+                  width: "100%",
+                  maxWidth: 520,
+                  maxHeight: "86vh",
+                  overflowY: "auto",
+                  color: C.text,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: C.accent }}>💾 备份与同步</span>
+                  <button onClick={() => setShowBackup(false)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 16, cursor: "pointer" }}>✕</button>
+                </div>
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
+                  包含：账号与花朵、收集目标、枯萎提醒开关、折叠账号、收集排序、主题与置顶账号。
+                </div>
+
+                {backupMsg && (
+                  <div style={{
+                    fontSize: 12, lineHeight: 1.6, borderRadius: 8, padding: "8px 12px", marginBottom: 14,
+                    background: (backupMsg.type === "ok" ? C.alive : C.wilted) + "25",
+                    border: `1px solid ${backupMsg.type === "ok" ? C.alive : C.wilted}50`,
+                    color: backupMsg.type === "ok" ? C.alive : C.wilted,
+                  }}>{backupMsg.text}</div>
+                )}
+
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>文件备份</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+                  <button onClick={exportData} style={{ ...btn(C.accent), flex: 1, fontSize: 13 }}>💾 导出为 JSON</button>
+                  <label style={{ ...btn(C.muted), flex: 1, fontSize: 13, textAlign: "center", cursor: "pointer" }}>
+                    📂 从文件导入
+                    <input type="file" accept=".json" onChange={e => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
+                  </label>
+                </div>
+
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>分享码 · 跨设备粘贴同步</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  {SHARE_SCOPES.map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => { setShareScope(s.id); setBackupMsg(null); }}
+                      title={s.hint}
+                      style={{
+                        flex: 1, fontSize: 12, padding: "5px 0", borderRadius: 6, cursor: "pointer", fontFamily: "inherit",
+                        background: shareScope === s.id ? C.accentDim : "transparent",
+                        color: shareScope === s.id ? "#ffffff" : C.muted,
+                        border: `1px solid ${shareScope === s.id ? C.accentDim : C.border}`,
+                      }}
+                    >{s.label}</button>
+                  ))}
+                </div>
+                <button onClick={generateShareCode} style={{ ...btn(C.accentDim), width: "100%", fontSize: 13, marginBottom: 8 }}>🔗 生成分享码</button>
+                {shareCode && (
+                  <>
+                    <textarea
+                      readOnly
+                      value={shareCode}
+                      onFocus={e => e.target.select()}
+                      rows={3}
+                      style={codeBox(C, isDark)}
+                    />
+                    <button
+                      onClick={() => copyText(shareCode, "__share__")}
+                      style={{ ...btn(C.alive), width: "100%", fontSize: 13, margin: "8px 0 12px" }}
+                    >{copiedId === "__share__" ? "✓ 已复制" : "📋 复制分享码"}</button>
+                  </>
+                )}
+                <textarea
+                  value={sharePaste}
+                  onChange={e => { setSharePaste(e.target.value); setBackupMsg(null); }}
+                  rows={3}
+                  placeholder="把另一台设备生成的分享码粘贴到这里…"
+                  style={{ ...codeBox(C, isDark), marginBottom: 8 }}
+                />
+                <button onClick={importShareCode} style={{ ...btn(C.alive), width: "100%", fontSize: 13, marginBottom: 18 }}>📥 导入分享码</button>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: C.accent }}>自动快照 · 最近 {SNAPSHOT_MAX} 次改动前</span>
+                  {snapshots.length > 0 && (
+                    <button onClick={clearSnapshots} style={tinyBtn(C.muted)}>清空</button>
+                  )}
+                </div>
+                {snapshots.length === 0 ? (
+                  <div style={{ fontSize: 12, color: C.muted, padding: "6px 0 2px" }}>暂无快照，改动数据后会自动生成。</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {snapshots.map(snap => {
+                      const sum = snapshotSummary(snap.data);
+                      return (
+                        <div key={snap.at} style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+                          borderRadius: 8, padding: "8px 12px",
+                        }}>
+                          <div style={{ fontSize: 12, color: C.text }}>
+                            {fmtBackupTime(new Date(snap.at).toISOString())}
+                            <span style={{ color: C.muted, marginLeft: 8 }}>{sum.accounts} 账号 · {sum.flowers} 种花</span>
+                          </div>
+                          <button onClick={() => restoreSnapshot(snap)} style={tinyBtn(C.urgent)}>恢复</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {pendingRestore && (
+            <div
+              onClick={() => setPendingRestore(null)}
+              style={{
+                position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                zIndex: 400, padding: 16,
+              }}
+            >
+              <div
+                onClick={e => e.stopPropagation()}
+                style={{
+                  background: C.modalBg, border: `1px solid ${C.accentDim}`,
+                  borderRadius: 12, padding: 20, width: "100%", maxWidth: 380, color: C.text,
+                }}
+              >
+                <div style={{ fontSize: 16, fontWeight: 700, color: C.accent, marginBottom: 8 }}>选择导入方式</div>
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.7, marginBottom: 14 }}>
+                  来自{pendingRestore.source}的备份：
+                  <div style={{ color: C.text, marginTop: 4 }}>
+                    {(() => {
+                      const p = pendingRestore.backup;
+                      const flowers = (p.accounts || []).reduce((s, a) => s + ((a.flowers || []).length), 0);
+                      const goals = Object.keys(p.collectionGoals || {}).length;
+                      if (!(p.accounts || []).length) return "仅设置（主题 / 排序 / 提醒 / 折叠 / 置顶），不含账号数据";
+                      return `${p.accounts.length} 个账号 · ${flowers} 种花 · ${goals} 个收集目标${p._version === 1 ? "（旧版备份，仅含账号数据）" : ""}`;
+                    })()}
+                  </div>
+                </div>
+
+                {(pendingRestore.backup.accounts || []).length > 0 && (
+                  <>
+                    <button onClick={() => applyBackup(pendingRestore.backup, "merge")} style={{ ...btn(C.alive), width: "100%", fontSize: 13, marginBottom: 8 }}>
+                      🔀 合并导入 · 按账号ID合并，缺的保留
+                    </button>
+                    <button onClick={() => applyBackup(pendingRestore.backup, "overwrite")} style={{ ...btn(C.urgent), width: "100%", fontSize: 13, marginBottom: 8 }}>
+                      ♻️ 覆盖导入 · 清空现有账号数据
+                    </button>
+                  </>
+                )}
+                <button onClick={() => applyBackup(pendingRestore.backup, "prefsOnly")} style={{ ...btn(C.accentDim), width: "100%", fontSize: 13, marginBottom: 12 }}>
+                  ⚙️ 只导入设置 · 账号数据不动
+                </button>
+                <button onClick={() => setPendingRestore(null)} style={{ ...btn(C.muted), width: "100%", fontSize: 13 }}>取消</button>
+              </div>
+            </div>
+          )}
+
+          {showBackToTop && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();  // ← 新增这行
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              style={{
+                position: 'fixed',
+                bottom: 24,
+                right: 24,
+                width: 48,
+                height: 48,
+                borderRadius: '50%',
+                background: isDark
+                  ? 'linear-gradient(135deg, rgba(180, 143, 208, 0.15) 0%, rgba(106, 64, 128, 0.25) 100%)'
+                  : 'linear-gradient(135deg, rgba(180, 143, 208, 0.1) 0%, rgba(106, 64, 128, 0.2) 100%)',
+                backdropFilter: 'blur(12px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+                border: `1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.4)'}`,
+                color: C.accent,
+                fontSize: 22,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: isDark
+                  ? '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 1px rgba(180,143,208,0.1)'
+                  : '0 8px 32px rgba(123,79,160,0.15), inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 1px rgba(180,143,208,0.08)',
+                zIndex: 100,
+                transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                opacity: showBackToTop ? 1 : 0,
+                transform: showBackToTop ? 'translateY(0) scale(1)' : 'translateY(10px) scale(0.9)',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)';
+                e.currentTarget.style.boxShadow = isDark
+                  ? '0 12px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.15), 0 0 20px rgba(180,143,208,0.2)'
+                  : '0 12px 40px rgba(123,79,160,0.25), inset 0 1px 0 rgba(255,255,255,0.8), 0 0 20px rgba(180,143,208,0.15)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.transform = 'translateY(0) scale(1)';
+                e.currentTarget.style.boxShadow = isDark
+                  ? '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1), 0 0 0 1px rgba(180,143,208,0.1)'
+                  : '0 8px 32px rgba(123,79,160,0.15), inset 0 1px 0 rgba(255,255,255,0.6), 0 0 0 1px rgba(180,143,208,0.08)';
+              }}
+              onMouseDown={e => {
+                e.currentTarget.style.transform = 'translateY(0) scale(0.95)';
+              }}
+              onMouseUp={e => {
+                e.currentTarget.style.transform = 'translateY(-2px) scale(1.05)';
+              }}
+              title="回到顶部"
+            >
+              ⇧
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+
+</html>
