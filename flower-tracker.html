@@ -1707,7 +1707,8 @@
 
       // ========== 收集进度相关函数 ==========
 
-      // 计算某花近14天的枯萎总数（所有账号）
+      // 计算某花在「未来 14 天窗口」内的枯萎总数（所有账号）
+      // 窗口为 [今天, 今天+14 天]，即包含第 14 天这一格 —— 见下方边界说明
       // 单色花按100%计算，双色花按50%计算，昙花14天内会枯萎7轮所以乘7
       function getFlowerWiltCount14Days(flowerName) {
         const todayStart = getTodayStart();
@@ -1720,10 +1721,14 @@
             const rem = remMs(f);
             if (rem === null) return;
 
-            // 统计14天内会枯萎的（包括已枯萎的）
+            // 统计窗口内的枯萎（含已枯萎的）
+            // 边界必须取 dayIndex <= 14（含第 14 天这一格）：
+            // 默认存活时长 336h 正好是 14 天，刚复活的花枯萎日恰好落在第 14 格，
+            // 若按 dayIndex >= 14 排除，它就会从分母里消失，
+            // 造成「复活后进度增加、预计天数反而变长」的假象。
             const wiltDate = getWiltDate(f.revivalTime, f.durationMs);
             const dayIndex = Math.floor((wiltDate - todayStart) / 86400000);
-            if (dayIndex < 0 || dayIndex >= 14) return;
+            if (dayIndex < 0 || dayIndex > 14) return;
 
             const normalizedName = f.name.replace(/^\d+/, ""); // 去掉前缀数字
 
