@@ -240,6 +240,11 @@
     const DEFAULT_MS = 336 * 3600 * 1000;
     const EPHEMERAL_MS = 48 * 3600 * 1000;
 
+    // 每日复活额度：游戏规则是一天内前 30 株复活的枯萎花各奖励 1 朵，超出的只复活不奖励。
+    // 也就是说无论花园里积了多少朵，一天最多只能把 30 朵转化成收集进度。
+    // 用于「预计完成天数」的日均封顶（见 getEstimatedDays）。
+    const DAILY_QUOTA = 30;
+
     // ========== 本地存储键 ==========
     const THEME_KEY = "xhx-theme";
     const REMINDER_KEY = "xhx-account-reminders";
@@ -1032,6 +1037,8 @@
       const [collectionAnimating, setCollectionAnimating] = useState(false);
       const [collectionAddModal, setCollectionAddModal] = useState(null);
       const [collectionSearch, setCollectionSearch] = useState("");
+      // 收集面板里的「预计天数怎么算」说明是否展开（点表头的 ? 切换）
+      const [showQuotaTip, setShowQuotaTip] = useState(false);
       const [collectionSort, setCollectionSort] = useState(() => {
         return localStorage.getItem(SORT_KEY) || "progress";
       }); // progress | progressDesc | name | nameDesc | earliest | latest
@@ -1762,12 +1769,17 @@
       // 计算预计完成天数
       // 注意：getFlowerWiltCount14Days 已经考虑了昙花的7倍乘数
       // 所以这里直接除以14就是每天平均可获得数量
+      //
+      // 日均要按每日额度封顶：供给再多，一天也只有前 DAILY_QUOTA 株复活会奖励花，
+      // 超出的只能顺延到第二天。供给不超额度时封顶不生效（不误伤正常情况）；
+      // 供给饱和时吞吐恒定在 DAILY_QUOTA/天，「剩余 ÷ DAILY_QUOTA」正好是精确解。
       function getEstimatedDays(flowerName, needed, owned) {
         const remaining = needed - owned;
         if (remaining <= 0) return 0;
         const effectiveCount14 = getFlowerWiltCount14Days(flowerName);
         if (effectiveCount14 <= 0) return null; // 无法计算
-        const perDay = effectiveCount14 / 14;
+        const rawPerDay = effectiveCount14 / 14;
+        const perDay = Math.min(rawPerDay, DAILY_QUOTA);
         const days = remaining / perDay;
         return Math.ceil(days);
       }
@@ -2573,7 +2585,7 @@
                       {getCalendarData(searchText)[0].pending > 0
                         ? `待处理 ${getCalendarData(searchText)[0].pending} 朵`
                         : "今日任务已完成"}
-                      （今日额度 {todayRevived}/30）
+                      （今日额度 {todayRevived}/{DAILY_QUOTA}）
                     </span>
                     <span style={{
                       fontSize: 12,
@@ -3785,12 +3797,57 @@
                 justifyContent: "space-between",
                 flexShrink: 0,
               }}>
-                <span style={{ fontSize: 15, fontWeight: 600, color: C.accent }}>📊 收集进度</span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: C.accent }}>📊 收集进度</span>
+                  <button
+                    onClick={() => setShowQuotaTip(v => !v)}
+                    title="预计天数怎么算？"
+                    aria-label="预计天数怎么算？"
+                    aria-expanded={showQuotaTip}
+                    style={{
+                      width: 16, height: 16, borderRadius: "50%",
+                      border: `1px solid ${showQuotaTip ? C.accent : C.muted + "80"}`,
+                      background: showQuotaTip
+                        ? (isDark ? "rgba(180,143,208,0.25)" : "rgba(123,79,160,0.12)")
+                        : "transparent",
+                      color: showQuotaTip ? C.accent : C.muted,
+                      fontSize: 11, lineHeight: 1, fontFamily: "inherit",
+                      padding: 0, flexShrink: 0, cursor: "pointer",
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                    }}
+                  >?</button>
+                </span>
                 <button
                   onClick={() => setShowCollection(false)}
                   style={{ background: "transparent", border: "none", color: C.muted, fontSize: 16, cursor: "pointer" }}
                 >✕</button>
               </div>
+
+              {/* 预计天数的口径说明（点表头的 ? 展开） */}
+              {showQuotaTip && (
+                <div style={{
+                  padding: "10px 16px",
+                  borderBottom: `1px solid ${C.border}`,
+                  background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                  fontSize: 12,
+                  lineHeight: 1.75,
+                  color: C.muted,
+                  flexShrink: 0,
+                }}>
+                  <div style={{ color: C.text, fontWeight: 600, marginBottom: 4 }}>
+                    预计天数 = 还缺的朵数 ÷ 日均获得量
+                  </div>
+                  <div>
+                    日均按「今天起 14 天内会枯萎的花」折算，并<span style={{ color: C.urgent }}>封顶 {DAILY_QUOTA} 朵/天</span>——游戏里每天前 {DAILY_QUOTA} 株复活才有奖励，超出的只能顺延，积压再多也快不过这个速度。
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    这是<strong style={{ color: C.text }}>乐观口径</strong>：相当于假设这段时间的复活额度都只花在这一种花上。同时推进多个目标时它们会互相争额度，实际天数会比显示的更长。
+                  </div>
+                  <div style={{ marginTop: 4 }}>
+                    双色花按 50% 计入（另一半颜色是普通花）；昙花 48 小时一轮，按 14 天 7 轮折算。
+                  </div>
+                </div>
+              )}
 
               {/* 搜索排序操作栏（一行） */}
               <div style={{
