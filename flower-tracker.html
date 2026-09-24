@@ -1635,11 +1635,11 @@
           };
         }
 
-        // 先统计今天已复活的花（从 revivedTodayIds）
+        // 先统计今天已复活的花（从 revivedTodayIds，键为 stableFlowerKey：accountId|花名）
         accounts.forEach(a => {
           if (!shouldIncludeAccount(a)) return;
           a.flowers.forEach(f => {
-            if (revivedTodayIds.has(f.id) && shouldIncludeFlower(a, f)) {
+            if (revivedTodayIds.has(stableFlowerKey(a.accountId, f.name)) && shouldIncludeFlower(a, f)) {
               data[todayStart].revived += f.count;
             }
           });
@@ -1658,8 +1658,8 @@
             const isExpired = rem <= 0; // 已枯萎
             const isTodayWilt = wiltTime >= todayStart && wiltTime < todayEnd; // 今天内枯萎
 
-            // 只统计未复活的
-            if (!revivedTodayIds.has(f.id) && (isExpired || isTodayWilt)) {
+            // 只统计未复活的（键与写入端一致：stableFlowerKey）
+            if (!revivedTodayIds.has(stableFlowerKey(a.accountId, f.name)) && (isExpired || isTodayWilt)) {
               data[todayStart].pending += f.count;
               data[todayStart].flowers.push(f);
             }
