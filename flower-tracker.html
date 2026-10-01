@@ -221,6 +221,13 @@
       from { opacity: 0; transform: translateX(40px) scale(0.92); }
       to   { opacity: 1; transform: translateX(0) scale(1); }
     }
+
+    /* 「回到刚改的账号」胶囊：每次编辑都弹一下，避免出现得悄无声息 */
+    @keyframes pillIn {
+      from { opacity: 0; transform: translateX(-18px) scale(0.88); }
+      60%  { opacity: 1; transform: translateX(2px) scale(1.04); }
+      to   { opacity: 1; transform: translateX(0) scale(1); }
+    }
   </style>
 
   <link rel="icon"
@@ -250,6 +257,7 @@
     const REMINDER_KEY = "xhx-account-reminders";
     const COLLAPSED_KEY = "xhx-collapsed-accounts";
     const SORT_KEY = "xhx-collection-sort";
+    const LOW_PRIORITY_KEY = "xhx-low-priority-kinds";
     const PINNED_KEY = "xhx-pinned-account";
     const TODAY_KEY = "xhx-today-revived";
     const TODAY_IDS_KEY = "xhx-revived-today-ids";
@@ -351,6 +359,7 @@
         accountReminders: readJSON(REMINDER_KEY, []),
         collapsedAccounts: readJSON(COLLAPSED_KEY, []),
         pinnedAccount: readJSON(PINNED_KEY, null),
+        lowPriorityKinds: readJSON(LOW_PRIORITY_KEY, []),
       };
       if (scope === "accounts") {
         return { ...head, accounts: readJSON(STORAGE_KEY, []), collectionGoals: {}, prefs: {} };
@@ -801,6 +810,12 @@
       return f.revivalTime + f.durationMs - Date.now();
     }
 
+    // 花种名：去掉批次前缀数字（"1黑色罗布麻" → "黑色罗布麻"）。
+    // 「不着急」标记按花种生效，跨账号共享同一条标记。
+    function flowerKind(name) {
+      return String(name || "").replace(/^\d+/, "");
+    }
+
     function fmtRem(ms) {
       if (ms === null) return "未记录";
       const abs = Math.abs(ms);
@@ -964,6 +979,9 @@
       const [addModal, setAddModal] = useState(null);
       const [editingFlower, setEditingFlower] = useState(null);
       const [searchText, setSearchText] = useState("");
+      // 「只看不着急」视图：把列表收窄成只含打了「不着急」标记的花（跨账号）
+      // 会话级、不持久化 —— 免得下次打开看到被过滤过的列表而以为花丢了
+      const [lowPriorityOnly, setLowPriorityOnly] = useState(false);
       const [accountReminders, setAccountReminders] = useState(() => {
         const saved = localStorage.getItem(REMINDER_KEY);
         return saved ? new Set(JSON.parse(saved)) : new Set();
@@ -1017,6 +1035,18 @@
         }
         return new Set();
       });
+      // 今天已复活的花里，属于「今日枯萎批次」的那些（复活前枯萎时刻落在今天）。
+      // 复活会覆盖 revivalTime，原枯萎时刻就丢了，所以必须在复活那一刻记下来，
+      // 否则「今日枯萎总数」会被复活吃掉（显示 49 变 33）。
+      const [revivedTodayBatchIds, setRevivedTodayBatchIds] = useState(() => {
+        const saved = localStorage.getItem(TODAY_IDS_KEY);
+        const today = new Date().toDateString();
+        if (saved) {
+          const { date, todayWiltIds } = JSON.parse(saved);
+          if (date === today) return new Set(todayWiltIds || []);
+        }
+        return new Set();
+      });
 
       const [theme, setTheme] = useState(() => {
         const saved = localStorage.getItem(THEME_KEY);
@@ -1042,7 +1072,33 @@
       const [collectionSort, setCollectionSort] = useState(() => {
         return localStorage.getItem(SORT_KEY) || "progress";
       }); // progress | progressDesc | name | nameDesc | earliest | latest
+      // 「不着急」花种标记：只影响账号内的排序位置，不参与任何统计
+      const [lowPriorityKinds, setLowPriorityKinds] = useState(() => {
+        return new Set(readJSON(LOW_PRIORITY_KEY, []));
+      });
       const [dualColorModal, setDualColorModal] = useState(null);
+
+      // ========== 「最近修改」追踪 ==========
+      // 账号排序会随剩余时间/标记变化而移动，改完某个账号再回头容易找不到。
+      // 这里记录最近改过的账号（最多 3 个），页面角落浮出胶囊，一键跳回并高亮。
+      const [recentEdited, setRecentEdited] = useState([]);   // 每项 { accountId }
+      const [flashAccountId, setFlashAccountId] = useState(null);
+
+      function markEdited(accountId) {
+        if (!accountId) return;
+        // seq 让胶囊重新挂载，入场动画每次都能重放（同一账号连改也会再弹一下）
+        const seq = Date.now();
+        setRecentEdited(prev => [{ accountId, seq }, ...prev.filter(r => r.accountId !== accountId)].slice(0, 3));
+      }
+
+      function jumpToAccount(accountId) {
+        const el = document.querySelector(`[data-account-id="${accountId}"]`);
+        if (el && typeof el.scrollIntoView === "function") {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        setFlashAccountId(accountId);
+        setTimeout(() => setFlashAccountId(cur => (cur === accountId ? null : cur)), 2200);
+      }
 
       // ========== Toast 通知状态 ==========
       const [toasts, setToasts] = useState([]);
@@ -1186,6 +1242,11 @@
         } catch { }
       }, [collectionSort]);
 
+      // ========== 「不着急」花种标记持久化 ==========
+      useEffect(() => {
+        writeJSON(LOW_PRIORITY_KEY, Array.from(lowPriorityKinds));
+      }, [lowPriorityKinds]);
+
       // ========== 收集面板过渡动画 ==========
       useEffect(() => {
         if (showCollection) {
@@ -1286,13 +1347,23 @@
 
       useEffect(() => {
         const checkDayChange = () => {
-          const saved = localStorage.getItem(TODAY_KEY);
           const today = new Date().toDateString();
+          const saved = localStorage.getItem(TODAY_KEY);
           if (saved) {
             const { date } = JSON.parse(saved);
             if (date !== today) {
               setTodayRevived(0);
               localStorage.setItem(TODAY_KEY, JSON.stringify({ date: today, count: 0 }));
+            }
+          }
+          // 跨零点时今日复活记录也要清（只清额度会出现「复活不了／日历对不上」）
+          const savedIds = localStorage.getItem(TODAY_IDS_KEY);
+          if (savedIds) {
+            const { date } = JSON.parse(savedIds);
+            if (date !== today) {
+              setRevivedTodayIds(new Set());
+              setRevivedTodayBatchIds(new Set());
+              localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({ date: today, ids: [], todayWiltIds: [] }));
             }
           }
         };
@@ -1459,6 +1530,11 @@
         setCollapsedAccounts(prev => {
           const base = mode === "merge" ? prev : new Set();
           return new Set([...base, ...(prefs.collapsedAccounts || [])].filter(id => validIds.has(id)));
+        });
+        // 「不着急」标记按花种存，与账号 ID 无关，因此不做 validIds 过滤
+        setLowPriorityKinds(prev => {
+          const base = mode === "merge" ? prev : new Set();
+          return new Set([...base, ...(prefs.lowPriorityKinds || [])]);
         });
         if (prefs.pinnedAccount && validIds.has(prefs.pinnedAccount)) {
           setPinnedAccountId(prefs.pinnedAccount);
@@ -1631,6 +1707,9 @@
             count: 0,
             revived: 0,
             pending: 0,
+            wiltToday: 0,   // 今天 00:00–24:00 内枯萎、还没复活的棵数（含今天稍后才会枯的）
+            wiltTodayTotal: 0, // 今日枯萎总数（含今天已复活的），不随复活减少
+            backlog: 0,     // 今天之前就枯萎、一直没复活的积压棵数
             flowers: []
           };
         }
@@ -1639,8 +1718,11 @@
         accounts.forEach(a => {
           if (!shouldIncludeAccount(a)) return;
           a.flowers.forEach(f => {
-            if (revivedTodayIds.has(stableFlowerKey(a.accountId, f.name)) && shouldIncludeFlower(a, f)) {
+            const key = stableFlowerKey(a.accountId, f.name);
+            if (revivedTodayIds.has(key) && shouldIncludeFlower(a, f)) {
               data[todayStart].revived += f.count;
+              // 这朵是今天枯萎的、今天又被复活了 —— 它仍然算在今天枯萎总数里
+              if (revivedTodayBatchIds.has(key)) data[todayStart].wiltTodayTotal += f.count;
             }
           });
         });
@@ -1662,6 +1744,12 @@
             if (!revivedTodayIds.has(stableFlowerKey(a.accountId, f.name)) && (isExpired || isTodayWilt)) {
               data[todayStart].pending += f.count;
               data[todayStart].flowers.push(f);
+              // 切分：今日枯萎（枯萎时刻落在今天 00:00–24:00）/ 更早积压（今天之前就枯的）
+              if (isTodayWilt) {
+                data[todayStart].wiltToday += f.count;
+                data[todayStart].wiltTodayTotal += f.count;
+              }
+              else data[todayStart].backlog += f.count;
             }
           });
         });
@@ -1696,20 +1784,6 @@
           timestamp: parseInt(timestamp),
           ...info,
         }));
-      }
-
-      function getExpiredCount() {
-        return accounts.reduce((sum, a) => {
-          const accountExpired = a.flowers.reduce((flowerSum, f) => {
-            if (f.revivalTime === null) return flowerSum;
-            const rem = remMs(f);
-            if (rem !== null && rem <= -86400000) {
-              return flowerSum + f.count;
-            }
-            return flowerSum;
-          }, 0);
-          return sum + accountExpired;
-        }, 0);
       }
 
       // ========== 收集进度相关函数 ==========
@@ -1852,30 +1926,6 @@
       // ========== 【调试】暴露 accounts 到 window，方便 Console 调试 ==========
       useEffect(() => {
         window.__debugAccounts = accounts;
-        window.__debugGetExpired = () => {
-          const result = [];
-          accounts.forEach(a => {
-            a.flowers.forEach(f => {
-              if (f.revivalTime === null) return;
-              const rem = remMs(f);
-              if (rem !== null && rem <= -86400000) {
-                result.push({
-                  accountId: a.accountId,
-                  name: f.name,
-                  count: f.count,
-                  remMs: rem,
-                  remDays: (rem / 86400000).toFixed(2),
-                  revivalTime: new Date(f.revivalTime).toLocaleString('zh-CN'),
-                  durationHours: f.durationMs / 3600000,
-                });
-              }
-            });
-          });
-          console.log('=== 过期花朵调试 ===');
-          console.log('过期总数:', result.reduce((s, r) => s + r.count, 0));
-          console.log('过期明细:', result);
-          return result;
-        };
       }, [accounts]);
 
       // ========== 今日复活计数 ==========
@@ -1891,6 +1941,7 @@
       }
 
       function saveFlowerRename(accountId, flowerId) {
+        markEdited(accountId);
         if (!editingFlower || !editingFlower.text.trim()) {
           setEditingFlower(null);
           return;
@@ -1929,6 +1980,10 @@
         setAccounts(prev => prev.map(a =>
           a.accountId !== oldAccountId ? a : { ...a, accountId: newAccountId }
         ));
+
+        // 改账号 ID 也算「修改过」：胶囊里若存着旧 ID 要同步换名，否则点进去找不到元素
+        setRecentEdited(prev => prev.map(r => (r.accountId === oldAccountId ? { ...r, accountId: newAccountId } : r)));
+        markEdited(newAccountId);
 
         // 同步迁移以 accountId 为键的附属数据，否则提醒 / 折叠 / 置顶会静默失效
         setAccountReminders(prev => {
@@ -1993,13 +2048,45 @@
         setImportText(""); setImportText2(""); setImportError(""); setShowImport(false);
       }
 
+      // ========== 今日枯萎批次的记账 ==========
+      // 「今日枯萎总数」= 未复活且今天枯的 + 今天已复活但复活前就在今天枯萎的。
+      // 后面这一半必须在复活前算，因为复活会把 revivalTime 改成 now，原枯萎时刻随之丢失。
+      function isTodayBatchFlower(f) {
+        if (!f || f.revivalTime === null) return false;
+        const wiltTime = f.revivalTime + f.durationMs;
+        const start = getTodayStart();
+        return wiltTime >= start && wiltTime < start + 86400000;
+      }
+
+      function persistRevivedToday(nextIds, nextBatchIds) {
+        localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({
+          date: new Date().toDateString(),
+          ids: Array.from(nextIds),
+          todayWiltIds: Array.from(nextBatchIds || []),
+        }));
+      }
+
+      // 记下今天复活了哪些花（ids）以及其中哪些原本属于今日批次（batchIds）
+      function commitRevivedToday(addKeys, addBatchKeys) {
+        const nextIds = new Set(revivedTodayIds);
+        (addKeys || []).forEach(k => nextIds.add(k));
+        const nextBatch = new Set(revivedTodayBatchIds);
+        (addBatchKeys || []).forEach(k => nextBatch.add(k));
+        setRevivedTodayIds(nextIds);
+        setRevivedTodayBatchIds(nextBatch);
+        persistRevivedToday(nextIds, nextBatch);
+      }
+
       function reviveOne(accountId, flowerId) {
+        markEdited(accountId);
         const now = Date.now();
         const account = accounts.find(a => a.accountId === accountId);
         const flower = account ? account.flowers.find(fl => fl.id === flowerId) : null;
         const addCount = flower ? flower.count : 0;
         // 用「账号ID|花名」做今日去重键，uid 在导入备份后会重新生成
         const todayKey = flower ? stableFlowerKey(accountId, flower.name) : null;
+        // 复活前它是不是「今天枯萎的」——复活会覆盖 revivalTime，所以先判断
+        const todayBatchKeys = (todayKey && isTodayBatchFlower(flower)) ? [todayKey] : [];
 
         // 检查是否是双色花
         const rareTargets = flower ? getRareTargetsFromDual(flower.name) : [];
@@ -2028,15 +2115,7 @@
                   return newCount;
                 });
 
-                setRevivedTodayIds(prev => {
-                  const newSet = new Set(prev);
-                  newSet.add(todayKey);
-                  localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({
-                    date: new Date().toDateString(),
-                    ids: Array.from(newSet),
-                  }));
-                  return newSet;
-                });
+                commitRevivedToday([todayKey], todayBatchKeys);
 
                 // 更新收集进度
                 allocations.forEach((count, idx) => {
@@ -2067,15 +2146,7 @@
             return newCount;
           });
 
-          setRevivedTodayIds(prev => {
-            const newSet = new Set(prev);
-            newSet.add(todayKey);
-            localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({
-              date: new Date().toDateString(),
-              ids: Array.from(newSet),
-            }));
-            return newSet;
-          });
+          commitRevivedToday([todayKey], todayBatchKeys);
 
           // 更新收集进度（如果该花在珍稀列表中）
           // 使用规范化花名（去掉前缀数字）匹配和存储
@@ -2087,10 +2158,15 @@
       }
 
       function reviveAll(accountId) {
+        markEdited(accountId);
         const now = Date.now();
         const account = accounts.find(a => a.accountId === accountId);
         const allFlowers = account ? account.flowers : [];
         const newRevived = allFlowers.filter(f => !revivedTodayIds.has(stableFlowerKey(accountId, f.name)));
+        // 这一批里原本属于「今天枯萎批次」的花（复活前算，复活后信息就没了）
+        const newRevivedBatchKeys = newRevived
+          .filter(f => isTodayBatchFlower(f))
+          .map(f => stableFlowerKey(accountId, f.name));
 
         // 分离单色花和双色花
         const singleColorFlowers = [];
@@ -2125,12 +2201,10 @@
                   localStorage.setItem(TODAY_KEY, JSON.stringify({ date: new Date().toDateString(), count: newCount }));
                   return newCount;
                 });
-                setRevivedTodayIds(prev => {
-                  const newSet = new Set(prev);
-                  newRevived.forEach(f => newSet.add(stableFlowerKey(accountId, f.name)));
-                  localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({ date: new Date().toDateString(), ids: Array.from(newSet) }));
-                  return newSet;
-                });
+                commitRevivedToday(
+                  newRevived.map(f => stableFlowerKey(accountId, f.name)),
+                  newRevivedBatchKeys
+                );
 
                 // 更新单色花的收集进度
                 singleColorFlowers.forEach(f => {
@@ -2169,12 +2243,10 @@
             localStorage.setItem(TODAY_KEY, JSON.stringify({ date: new Date().toDateString(), count: newCount }));
             return newCount;
           });
-          setRevivedTodayIds(prev => {
-            const newSet = new Set(prev);
-            newRevived.forEach(f => newSet.add(stableFlowerKey(accountId, f.name)));
-            localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({ date: new Date().toDateString(), ids: Array.from(newSet) }));
-            return newSet;
-          });
+          commitRevivedToday(
+            newRevived.map(f => stableFlowerKey(accountId, f.name)),
+            newRevivedBatchKeys
+          );
 
           // 更新收集进度
           singleColorFlowers.forEach(f => {
@@ -2232,6 +2304,7 @@
         if (isNaN(totalHours) || totalHours < 0) return;
 
         const rt = modal.revivalTimeStr ? new Date(modal.revivalTimeStr).getTime() : null;
+        markEdited(modal.accountId);
         setAccounts(prev => prev.map(a =>
           a.accountId !== modal.accountId ? a : {
             ...a,
@@ -2269,6 +2342,7 @@
       }
 
       function deleteFlower(accountId, flowerId) {
+        markEdited(accountId);
         setAccounts(prev => prev.map(a =>
           a.accountId !== accountId ? a
             : { ...a, flowers: a.flowers.filter(f => f.id !== flowerId) }
@@ -2313,6 +2387,7 @@
           setAddModal(prev => ({ ...prev, error: "格式错误或花朵已存在，请使用 花名+数量 格式" }));
           return;
         }
+        markEdited(addModal.accountId);
         setAccounts(prev => prev.map(a =>
           a.accountId !== addModal.accountId ? a
             : { ...a, flowers: [...a.flowers, ...newFlowers] }
@@ -2333,15 +2408,34 @@
         if (!aAllUnknown && bAllUnknown) return 1;
 
         // 其余按最紧急的花排序（剩余时间越短越靠前）
+        // 「不着急」的花种不参与账号的紧急度计算：整个账号只剩不着急的枯萎花时，
+        // 它的排序键变成未来最近的开花倒计时，自然沉到还有急事的账号后面
+        // 例外：「只看不着急」视图下反过来 —— 池子就是这些花本身，按其中最急的一朵排，
+        // 否则两边都算不出有限值（NaN），顺序会变成随机
+        const poolOf = acc => lowPriorityOnly
+          ? acc.flowers.filter(f => lowPriorityKinds.has(flowerKind(f.name)))
+          : acc.flowers;
         const minRem = acc => {
-          const rs = acc.flowers.map(f => remMs(f)).filter(r => r !== null);
+          const rs = poolOf(acc)
+            .filter(f => lowPriorityOnly || !lowPriorityKinds.has(flowerKind(f.name)))
+            .map(f => remMs(f))
+            .filter(r => r !== null);
           return rs.length ? Math.min(...rs) : Infinity;
         };
-        return minRem(a) - minRem(b);
+        const ra = minRem(a), rb = minRem(b);
+        if (ra === rb) return 0;                      // 都是 Infinity 时保持原顺序（稳定排序）
+        return ra - rb;
       });
 
       // ========== 搜索过滤 ==========
-      const filteredSorted = sorted.filter(account => {
+      // 「只看不着急」：先把账号裁成只含打了标的花（账号里一朵都不剩就整张卡片收掉）
+      const viewSorted = lowPriorityOnly
+        ? sorted
+          .map(a => ({ ...a, flowers: a.flowers.filter(f => lowPriorityKinds.has(flowerKind(f.name))) }))
+          .filter(a => a.flowers.length > 0)
+        : sorted;
+
+      const filteredSorted = viewSorted.filter(account => {
         // 搜索"//"显示所有折叠账号
         if (searchText.trim() === "//") {
           return collapsedAccounts.has(account.accountId);
@@ -2487,17 +2581,6 @@
                         return "📅 近14天枯萎日历";
                       })()}
                     </span>
-                    {(() => {
-                      const expiredCount = getExpiredCount();
-                      return expiredCount > 0 && !searchText.trim() && (
-                        <span style={{
-                          display: "inline-block", borderRadius: 12,
-                          padding: "2px 10px", fontSize: 12, fontWeight: 700,
-                          background: C.wilted + "30", color: C.wilted,
-                          border: `1px solid ${C.wilted}60`,
-                        }}>{expiredCount}朵已过期</span>
-                      );
-                    })()}
                   </div>
                   {/* 中间：搜索框 */}
                   <div style={{
@@ -2579,6 +2662,33 @@
                         }).length, 0)} 个结果
                       </span>
                     )}
+
+                    {/* 「只看不着急」开关：一键把列表收窄成打了标的花，不用打字 */}
+                    {lowPriorityKinds.size > 0 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setLowPriorityOnly(v => !v); }}
+                        title={lowPriorityOnly
+                          ? "正在只看「不着急」的花 —— 再点一下显示全部"
+                          : `只看标了「不着急」的花（共 ${lowPriorityKinds.size} 种，跨账号）`}
+                        style={{
+                          marginLeft: 8,
+                          flexShrink: 0,
+                          whiteSpace: "nowrap",
+                          fontSize: 11,
+                          fontFamily: "inherit",
+                          padding: "4px 10px",
+                          borderRadius: 999,
+                          cursor: "pointer",
+                          background: lowPriorityOnly
+                            ? (isDark ? "rgba(180, 143, 208, 0.28)" : "rgba(123, 79, 160, 0.16)")
+                            : "transparent",
+                          border: `1px solid ${lowPriorityOnly ? C.accent : C.border}`,
+                          color: lowPriorityOnly ? C.accent : C.muted,
+                          fontWeight: lowPriorityOnly ? 700 : 400,
+                          transition: "background 0.2s, color 0.2s, border-color 0.2s",
+                        }}
+                      >{lowPriorityOnly ? "只看不着急 ✓" : `不着急 ${lowPriorityKinds.size} 种`}</button>
+                    )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <span style={{ fontSize: 12, color: C.muted }}>
@@ -2627,6 +2737,40 @@
 
                         return (
                           <>
+                            {/* 今日概览：今天（00:00–24:00）枯萎了多少棵，以及更早的积压 */}
+                            {(() => {
+                              const t = calendarDays[0];
+                              if (!t) return null;
+                              // 「今日已超额」= 今天这一批（今日枯萎 + 已复活）超过 30 的奖励额度
+                              const overLimit = t.revived + (t.wiltToday || 0) > 30;
+                              return (
+                                <div style={{
+                                  display: "flex", flexWrap: "wrap", alignItems: "center",
+                                  gap: 8, padding: "0 2px 10px", fontSize: 12, color: C.muted,
+                                }}>
+                                  <span style={{ color: C.text, fontWeight: 600 }}>
+                                    今日枯萎 {t.wiltTodayTotal} 棵
+                                  </span>
+                                  <span>·</span>
+                                  <span>其中未复活 {t.wiltToday} 棵</span>
+                                  <span>·</span>
+                                  <span>更早积压 {t.backlog} 棵</span>
+                                  {overLimit && (
+                                    <span style={{ color: C.wilted, fontWeight: 600 }}>今日已超额</span>
+                                  )}
+                                  <span
+                                    title={"「今日枯萎」= 枯萎时刻落在今天 00:00–24:00 之间的棵数（包含今天稍后才会枯的），也就是「今天这一批」的总量，复活了也不会减。\n「其中未复活」= 今天这一批里还没复活的棵数，也就是今天还要处理多少。\n「更早积压」= 今天之前就枯萎、一直没复活的棵数，可以留着后面慢慢复活，游戏里不会有损失。\n今天那格柱子只画今天这一批（绿色＝已复活 + 橙色＝未复活，按 30 为满格）；绿色是今天复活的全部棵数，可能含复活更早积压的花，所以 绿+橙 不一定等于上面的「今日枯萎」。"}
+                                    style={{
+                                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                      width: 15, height: 15, borderRadius: "50%",
+                                      border: `1px solid ${C.border}`, color: C.muted,
+                                      fontSize: 10, cursor: "help",
+                                    }}
+                                  >?</span>
+                                </div>
+                              );
+                            })()}
+
                             {/* 横向时间轴 */}
                             <div
                               className={isDark ? "dark-scrollbar" : "light-scrollbar"}
@@ -2639,23 +2783,24 @@
                             >
                               {calendarDays.map((day, index) => {
                                 const isToday = index === 0;
-                                const totalToday = day.revived + day.pending;
-                                const isOverLimit = totalToday > 30;
+                                // 今天柱子只画「今天这一批」：已复活 + 今日枯萎（更早积压只在概览行体现）
+                                const barTotal = isToday ? day.revived + (day.wiltToday || 0) : day.count;
+                                const isOverLimit = isToday && barTotal > 30;
 
                                 // 计算柱子高度
-                                let revivedHeight, pendingHeight;
-                                if (totalToday === 0) {
-                                  // 今天没有任务，柱子空白
+                                let revivedHeight, todayWiltHeight;
+                                if (barTotal === 0) {
+                                  // 今天这一批为空，柱子空白
                                   revivedHeight = 0;
-                                  pendingHeight = 0;
-                                } else if (totalToday <= 30) {
-                                  // 总数不超过30，按30为满柱计算
+                                  todayWiltHeight = 0;
+                                } else if (barTotal <= 30) {
+                                  // 不超过30，按30为满柱计算
                                   revivedHeight = (day.revived / 30) * 100;
-                                  pendingHeight = (day.pending / 30) * 100;
+                                  todayWiltHeight = ((day.wiltToday || 0) / 30) * 100;
                                 } else {
-                                  // 总数超过30，按比例填满
-                                  revivedHeight = (day.revived / totalToday) * 100;
-                                  pendingHeight = (day.pending / totalToday) * 100;
+                                  // 超过30，按比例填满
+                                  revivedHeight = (day.revived / barTotal) * 100;
+                                  todayWiltHeight = ((day.wiltToday || 0) / barTotal) * 100;
                                 }
 
                                 return (
@@ -2679,24 +2824,15 @@
                                       borderRadius: 6,
                                       position: "relative",
                                       overflow: "hidden",
-                                      border: isToday ? `1px solid ${C.accent}50` : `1px solid ${C.border}`,
+                                      border: isToday
+                                        ? (isOverLimit ? `1px solid ${C.wilted}` : `1px solid ${C.accent}50`)
+                                        : `1px solid ${C.border}`,
                                       display: "flex",
                                       flexDirection: "column-reverse",
                                     }}>
                                       {isToday ? (
                                         <>
-                                          {/* 下层：待复活（橙色/红色）- 有 pending 才显示 */}
-                                          {day.pending > 0 && (
-                                            <div style={{
-                                              width: "100%",
-                                              height: `${pendingHeight}%`,
-                                              minHeight: 4,
-                                              background: isOverLimit ? C.wilted : C.urgent,
-                                              opacity: 0.9,
-                                            }} />
-                                          )}
-
-                                          {/* 上层：已复活（绿色）- 有 revived 才显示 */}
+                                          {/* 最下层：已复活（绿色） */}
                                           {day.revived > 0 && (
                                             <div style={{
                                               width: "100%",
@@ -2707,8 +2843,19 @@
                                             }} />
                                           )}
 
-                                          {/* 如果都没有，显示空白占位 */}
-                                          {totalToday === 0 && (
+                                          {/* 上层：今日枯萎（橙）- 今天 00:00–24:00 内枯的 */}
+                                          {(day.wiltToday || 0) > 0 && (
+                                            <div style={{
+                                              width: "100%",
+                                              height: `${todayWiltHeight}%`,
+                                              minHeight: 4,
+                                              background: C.urgent,
+                                              opacity: 0.9,
+                                            }} />
+                                          )}
+
+                                          {/* 今天这一批为空，显示空白占位 */}
+                                          {barTotal === 0 && (
                                             <div style={{
                                               width: "100%",
                                               height: "100%",
@@ -2734,8 +2881,8 @@
                                       {/* 数字显示 */}
                                       {isToday ? (
                                         <>
-                                          {/* 有待处理，显示待处理数字 */}
-                                          {day.pending > 0 && (
+                                          {/* 今天这批有枯萎，显示今日枯萎数 */}
+                                          {(day.wiltToday || 0) > 0 && (
                                             <div style={{
                                               position: "absolute",
                                               bottom: "50%",
@@ -2749,12 +2896,12 @@
                                               textShadow: "0 1px 3px rgba(0,0,0,0.6)",
                                               zIndex: 2,
                                             }}>
-                                              {day.pending}
+                                              {day.wiltToday}
                                             </div>
                                           )}
 
-                                          {/* 没有待处理但已复活，显示 ✓ */}
-                                          {day.pending === 0 && day.revived > 0 && (
+                                          {/* 今天这批没有枯萎但已复活，显示 ✓ */}
+                                          {(day.wiltToday || 0) === 0 && day.revived > 0 && (
                                             <div style={{
                                               position: "absolute",
                                               bottom: "50%",
@@ -2772,8 +2919,8 @@
                                             </div>
                                           )}
 
-                                          {/* 什么都没有，显示 - */}
-                                          {totalToday === 0 && (
+                                          {/* 今天这一批为空，显示 - */}
+                                          {barTotal === 0 && (
                                             <div style={{
                                               position: "absolute",
                                               bottom: "50%",
@@ -2813,7 +2960,7 @@
                                     {/* 下方标注 */}
                                     <div style={{ fontSize: 10, color: C.muted, textAlign: "center", lineHeight: 1.3 }}>
                                       {isToday ? (
-                                        totalToday > 0 ? `${day.revived}+${day.pending}` : "-"
+                                        barTotal > 0 ? `${day.revived}+${day.wiltToday || 0}` : "-"
                                       ) : (
                                         day.count > 0 ? `${day.count}朵` : ""
                                       )}
@@ -2827,16 +2974,18 @@
                             <div style={{
                               display: "flex",
                               alignItems: "center",
-                              justifyContent: "space-between",
+                              justifyContent: "flex-start",
+                              flexWrap: "wrap",
+                              gap: 12,
                               padding: "10px 14px",
                               borderBottom: `1px solid ${C.border}`,  // ← 修复：cardBorder → C.border
                               position: 'relative',
                             }}>
                               <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.alive, borderRadius: 2, marginRight: 4 }} />已复活</span>
-                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.urgent, borderRadius: 2, marginRight: 4 }} />待复活</span>
-                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.wilted, borderRadius: 2, marginRight: 4 }} />超额</span>
+                              <span><span style={{ display: "inline-block", width: 10, height: 10, background: C.urgent, borderRadius: 2, marginRight: 4 }} />今日枯萎</span>
                               <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#e8d8a0", borderRadius: 2, marginRight: 4 }} />未来≤30</span>
                               <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#e8a0a0", borderRadius: 2, marginRight: 4 }} />未来大于30</span>
+                              <span style={{ color: C.muted }}>红框＝今天这批超过30</span>
                             </div>
                           </>
                         );
@@ -2969,10 +3118,45 @@
             </div>  {/* ← 固定顶部包裹层闭合 */}
 
             {/* ========== 空状态提示 ========== */}
-            {filteredSorted.length === 0 && !showImport && !searchText.trim() && (
+            {filteredSorted.length === 0 && !showImport && !searchText.trim() && !lowPriorityOnly && (
               <div style={{ textAlign: "center", color: C.muted, marginTop: 60, fontSize: 15 }}>
                 <div style={{ fontSize: 36, marginBottom: 12 }}>🌱</div>
                 还没有记录，点击「+ 添加账号」开始追踪
+              </div>
+            )}
+
+            {/* 「只看不着急」视图下没有命中时，给一句解释 + 一键退出 */}
+            {lowPriorityOnly && filteredSorted.length === 0 && (
+              <div style={{ textAlign: "center", color: C.muted, marginTop: 50, fontSize: 14, lineHeight: 1.8 }}>
+                <div style={{ fontSize: 30, marginBottom: 8 }}>🍃</div>
+                {searchText.trim()
+                  ? <>「不着急」的花里没有匹配「{searchText.trim()}」的</>
+                  : <>标了「不着急」的花现在都不在列表里（可能已复活或被折叠）</>}
+                <div style={{ marginTop: 10 }}>
+                  <button
+                    onClick={() => { setLowPriorityOnly(false); }}
+                    style={{ ...btn(C.accent), padding: "6px 14px", fontSize: 13 }}
+                  >显示全部</button>
+                </div>
+              </div>
+            )}
+
+            {/* 「只看不着急」视图的说明条：避免以为花掉了 */}
+            {lowPriorityOnly && filteredSorted.length > 0 && (
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                gap: 10, marginBottom: 10, padding: "7px 12px", borderRadius: 10,
+                background: isDark ? "rgba(180, 143, 208, 0.12)" : "rgba(123, 79, 160, 0.08)",
+                border: `1px dashed ${C.accent}60`, fontSize: 12, color: C.muted,
+              }}>
+                <span>🍃 只显示标了「不着急」的花（{lowPriorityKinds.size} 种），其余已隐藏</span>
+                <button
+                  onClick={() => setLowPriorityOnly(false)}
+                  style={{
+                    background: "transparent", border: "none", color: C.accent,
+                    fontSize: 12, fontFamily: "inherit", cursor: "pointer", flexShrink: 0,
+                  }}
+                >显示全部</button>
               </div>
             )}
 
@@ -2987,6 +3171,8 @@
 
                 const cardBg = allWilted ? C.cardWilted : someWilted ? C.cardUrgent : C.card;
                 const cardBorder = allWilted ? C.borderWilted : someWilted ? C.borderUrgent : C.border;
+                // 「回到刚改的账号」跳过来时短暂高亮这个卡片
+                const isFlashing = flashAccountId === account.accountId;
 
                 return (
                   // ========== 【修改】账号卡片添加 onClick 阻止冒泡，保持置顶状态 ==========
@@ -2996,13 +3182,15 @@
                     className="account-card"
                     style={{
                       background: cardBg,
-                      border: `1px solid ${cardBorder}`,
+                      border: `1px solid ${isFlashing ? C.accent : cardBorder}`,
                       borderRadius: 12,
                       overflow: "hidden",
-                      boxShadow: isDark
-                        ? "0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3)"
-                        : "0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)",
-                      transition: "transform 0.2s, box-shadow 0.2s",
+                      boxShadow: isFlashing
+                        ? `0 0 0 3px ${C.accent}55, 0 8px 32px rgba(0, 0, 0, ${isDark ? 0.5 : 0.12})`
+                        : (isDark
+                          ? "0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3)"
+                          : "0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06)"),
+                      transition: "transform 0.2s, box-shadow 0.2s, border-color 0.2s",
                     }}
                     onClick={e => e.stopPropagation()}
                     onMouseEnter={e => {
@@ -3110,6 +3298,7 @@
                         {!allWilted && someWilted && <span style={pill(C.urgent)}>部分枯萎</span>}
                         {!someWilted && someUrgent && <span style={pill(C.urgent)}>即将枯萎</span>}
                         {allUnknown && <span style={pill(C.unknown)}>未记录</span>}
+                        {isFlashing && <span style={pill(C.accent)}>刚刚修改</span>}
                         {accountReminders.has(account.accountId) && (
                           <span style={{ fontSize: 13, marginLeft: 4 }}>🔔</span>
                         )}
@@ -3175,6 +3364,11 @@
                     <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6 }}>
                       {(() => {
                         const sortedFlowers = [...account.flowers].sort((a, b) => {
+                          // 「不着急」的花种在自己的账号内沉到最下面（组内仍按剩余时间升序）
+                          const la = lowPriorityKinds.has(flowerKind(a.name)) ? 1 : 0;
+                          const lb = lowPriorityKinds.has(flowerKind(b.name)) ? 1 : 0;
+                          if (la !== lb) return la - lb;
+
                           const ra = remMs(a);
                           const rb = remMs(b);
                           if (ra === null && rb === null) return 0;
@@ -3726,6 +3920,58 @@
             ))}
           </div>
 
+          {/* ========== 「回到刚改的账号」胶囊（最近修改过的账号，最多 3 个） ========== */}
+          {recentEdited.length > 0 && (
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                position: 'fixed',
+                bottom: 24,
+                left: 24,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: 8,
+                zIndex: 100,
+              }}
+            >
+              {recentEdited.map((r, i) => (
+                <button
+                  key={r.accountId + "-" + (r.seq || 0)}
+                  onClick={e => { e.stopPropagation(); jumpToAccount(r.accountId); }}
+                  title={"回到 #" + r.accountId + "（点一下滚过去并高亮）"}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '7px 14px',
+                    borderRadius: 999,
+                    animation: 'pillIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    background: isDark ? 'rgba(180, 143, 208, 0.16)' : 'rgba(180, 143, 208, 0.14)',
+                    backdropFilter: 'blur(12px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+                    border: `1px solid ${C.accent}50`,
+                    color: C.accent,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    fontFamily: 'inherit',
+                    cursor: 'pointer',
+                    opacity: i === 0 ? 1 : 0.75,
+                    boxShadow: isDark
+                      ? '0 6px 24px rgba(0,0,0,0.35)'
+                      : '0 6px 24px rgba(123,79,160,0.14)',
+                  }}
+                >↑ 回到 #{r.accountId}</button>
+              ))}
+              <button
+                onClick={e => { e.stopPropagation(); setRecentEdited([]); }}
+                title="清除这些快捷入口"
+                style={{
+                  background: 'transparent', border: 'none', color: C.muted,
+                  fontSize: 11, fontFamily: 'inherit', cursor: 'pointer', padding: '2px 8px',
+                }}
+              >清除</button>
+            </div>
+          )}
+
           {/* ========== 收集进度悬浮按钮 ========== */}
           <button
             onClick={(e) => {
@@ -4059,6 +4305,7 @@
                     const estimatedDays = c.estimatedDays;
                     const isCompleted = goal.needed > 0 && goal.owned >= goal.needed;
                     const hasStats = c.stats.single > 0 || c.stats.dual > 0;
+                    const isLowPriority = lowPriorityKinds.has(flowerName);
 
                     return (
                       <div key={flowerName} style={{
@@ -4083,6 +4330,28 @@
                             )}
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                            <button
+                              onClick={() => {
+                                setLowPriorityKinds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(flowerName)) next.delete(flowerName);
+                                  else next.add(flowerName);
+                                  return next;
+                                });
+                              }}
+                              style={{
+                                background: isLowPriority ? C.accentDim : "transparent",
+                                border: `1px solid ${isLowPriority ? C.accentDim : C.border}`,
+                                borderRadius: 10,
+                                padding: "1px 8px",
+                                fontSize: 11,
+                                color: isLowPriority ? "#ffffff" : C.muted,
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                                lineHeight: 1.6,
+                              }}
+                              title={"标记为「不着急」：这种花在所有账号里都会沉到所属账号的最下面，方便你先看别的。\n只影响排序，不影响任何数字（待处理、今日额度、日历统计都不变）。"}
+                            >不着急{isLowPriority ? " ✓" : ""}</button>
                             <button
                               onClick={() => {
                                 setCollectionAddModal({
