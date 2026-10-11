@@ -40,6 +40,20 @@ function djb2(s) {
   return x.toString(36);
 }
 
+// 口令输入容错：用户实际输入时很容易带进杂质——复制粘贴带尾随空格/换行、
+// 从消息里框选带全角冒号、中文输入法打出全角字符、手机/浏览器自动首字母大写。
+// 构建期对目标口令、运行期对用户输入做同一套归一化，保证这些姿势都能进。
+// 归一化 = 去掉所有空白 + 全角 ASCII 转半角 + 统一小写 + 只保留字母和数字。
+// 两端规则必须一致（构建端先归一化再算哈希），所以口令里的符号「形同虚设」，
+// 归一化后为空的口令直接拒绝构建，防止出现空口令直接放行。
+function normInput(s) {
+  return s
+    .replace(/\s+/g, "")
+    .replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
 const Babel = require(path.join(VENDOR, "babel.min.js"));
 
 let html = fs.readFileSync(SRC, "utf8");
@@ -109,13 +123,17 @@ html = html.replace("<title>花园复活追踪</title>",
 report.push("已加 noindex（不会被搜索引擎收录）");
 
 // ---------- 6. 访问口令覆盖层 ----------
-const gateHash = djb2(GATE_PASSWORD);
+const gateHash = djb2(normInput(GATE_PASSWORD));
+if (!normInput(GATE_PASSWORD)) {
+  console.error("! 口令归一化后为空（只统计字母和数字），请换一个口令。");
+  process.exit(6);
+}
 const gateHtml = `
   <div id="xhx-gate" style="position:fixed;inset:0;z-index:99999;background:#0c0c10;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans SC','PingFang SC',system-ui,sans-serif">
     <div style="text-align:center;padding:28px;width:100%;max-width:320px">
       <div style="font-size:34px;line-height:1;margin-bottom:16px">&#127812;</div>
       <div style="font-size:15px;color:#e0d8ec;margin-bottom:22px;letter-spacing:.5px">花园复活追踪</div>
-      <input id="xhx-gate-input" type="password" autocomplete="off" placeholder="访问口令"
+      <input id="xhx-gate-input" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="访问口令"
         style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #2f2b3a;background:#16141d;color:#e0d8ec;font-size:15px;outline:none;box-sizing:border-box">
       <button id="xhx-gate-btn"
         style="width:100%;margin-top:12px;padding:11px 14px;border-radius:10px;border:none;background:#7c5cbf;color:#fff;font-size:14px;font-weight:600;cursor:pointer">进 入</button>
@@ -132,7 +150,7 @@ const gateHtml = `
       var btn = document.getElementById("xhx-gate-btn");
       var err = document.getElementById("xhx-gate-err");
       function unlock() {
-        if (h(input.value) === HASH) {
+        if (h(n(input.value)) === HASH) {
           try { sessionStorage.setItem(KEY, HASH); } catch (e) { }
           gate.remove();
         } else {
@@ -142,6 +160,7 @@ const gateHtml = `
         }
       }
       function h(s) { var x = 5381; for (var i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) >>> 0; return x.toString(36); }
+      function n(s) { return s.replace(/\\s+/g, "").replace(/[\\uFF01-\\uFF5E]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }).toLowerCase().replace(/[^a-z0-9]/g, ""); }
       btn.addEventListener("click", unlock);
       input.addEventListener("keydown", function (e) { if (e.key === "Enter") unlock(); });
       setTimeout(function () { input.focus(); }, 120);
@@ -154,7 +173,7 @@ if (!html.includes('<div id="root"></div>')) {
   process.exit(4);
 }
 html = html.replace('<div id="root"></div>', () => '<div id="root"></div>' + gateHtml);
-report.push(`已加访问口令层（口令：${GATE_PASSWORD}，哈希 ${gateHash}）`);
+report.push(`已加访问口令层（口令：${GATE_PASSWORD}，哈希 ${gateHash}，输入容错：忽略空格/全角/大小写）`);
 
 // ---------- 7. 构建期自检 ----------
 const leaks = [];

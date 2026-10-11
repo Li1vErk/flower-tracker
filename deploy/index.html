@@ -547,7 +547,7 @@ var LZString=function(){var r=String.fromCharCode,o="ABCDEFGHIJKLMNOPQRSTUVWXYZa
     <div style="text-align:center;padding:28px;width:100%;max-width:320px">
       <div style="font-size:34px;line-height:1;margin-bottom:16px">&#127812;</div>
       <div style="font-size:15px;color:#e0d8ec;margin-bottom:22px;letter-spacing:.5px">花园复活追踪</div>
-      <input id="xhx-gate-input" type="password" autocomplete="off" placeholder="访问口令"
+      <input id="xhx-gate-input" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="访问口令"
         style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #2f2b3a;background:#16141d;color:#e0d8ec;font-size:15px;outline:none;box-sizing:border-box">
       <button id="xhx-gate-btn"
         style="width:100%;margin-top:12px;padding:11px 14px;border-radius:10px;border:none;background:#7c5cbf;color:#fff;font-size:14px;font-weight:600;cursor:pointer">进 入</button>
@@ -564,7 +564,7 @@ var LZString=function(){var r=String.fromCharCode,o="ABCDEFGHIJKLMNOPQRSTUVWXYZa
       var btn = document.getElementById("xhx-gate-btn");
       var err = document.getElementById("xhx-gate-err");
       function unlock() {
-        if (h(input.value) === HASH) {
+        if (h(n(input.value)) === HASH) {
           try { sessionStorage.setItem(KEY, HASH); } catch (e) { }
           gate.remove();
         } else {
@@ -574,6 +574,7 @@ var LZString=function(){var r=String.fromCharCode,o="ABCDEFGHIJKLMNOPQRSTUVWXYZa
         }
       }
       function h(s) { var x = 5381; for (var i = 0; i < s.length; i++) x = ((x << 5) + x + s.charCodeAt(i)) >>> 0; return x.toString(36); }
+      function n(s) { return s.replace(/\s+/g, "").replace(/[\uFF01-\uFF5E]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); }).toLowerCase().replace(/[^a-z0-9]/g, ""); }
       btn.addEventListener("click", unlock);
       input.addEventListener("keydown", function (e) { if (e.key === "Enter") unlock(); });
       setTimeout(function () { input.focus(); }, 120);
