@@ -18,6 +18,7 @@
 - [珍稀花与双色花机制](#珍稀花与双色花机制)
 - [枯萎提醒机制](#枯萎提醒机制)
 - [本地存储键一览](#本地存储键一览)
+- [部署到网页（手机访问）](#部署到网页手机访问)
 - [技术栈与运行原理](#技术栈与运行原理)
 - [可调参数（改造指南）](#可调参数改造指南)
 - [已知问题与注意事项](#已知问题与注意事项)
@@ -427,6 +428,37 @@ const useNewFormat = forceFormat2 || text.includes('#');
 
 ---
 
+## 部署到网页（手机访问）
+
+手机浏览器基本打不开 `file://` 本地文件（iOS 几乎不可行，Android 每次要重新下载），所以要在手机上使用，需要把工具部署到一个 https 网址上。仓库自带构建脚本，产出**零外部依赖**的单文件版本：
+
+```
+node build-deploy.js 你的口令
+```
+
+| 产物特性 | 说明 |
+| --- | --- |
+| `deploy/index.html` | 约 310 KB 单文件，可直接托管到任何静态服务 |
+| 零外部请求 | React / ReactDOM / lz-string 全部内联，**不依赖 unpkg / cdnjs**（手机弱网也能秒开） |
+| JSX 预编译 | 不再需要 2.8MB 的 babel-standalone，编译在构建期完成 |
+| 字体异步 | Google Fonts 改为非阻塞加载，取不到就用系统字体，**不会白屏** |
+| 访问口令 | 打开页面先输入口令（存在 `sessionStorage`，关标签页后需重输）。口令是客户端校验，防路人而非防技术攻击——页面上本来就没有数据，数据都在各自浏览器的存储里 |
+| noindex | 不被搜索引擎收录 |
+
+**依赖缓存**：构建需要的 React / ReactDOM / lz-string / Babel 下载一次存在 `vendor/`（已 gitignore），之后可离线构建。`vendor/` 里任何一个文件缺失时，从对应 CDN 重新下载即可（脚本会在启动时报出缺哪个）。
+
+**Cloudflare Pages 部署**（有 Cloudflare 账号即可，博客同款）：
+
+1. Cloudflare 控制台 → Workers & Pages → Create → Pages → **Upload assets**，项目名建议 `flower-tracker`（决定默认域名 `flower-tracker.pages.dev`）；
+2. 把 `deploy/index.html` 拖进去发布，几十秒后得到网址；
+3. 以后更新：重新构建 → 在项目里替换文件重新上传。（想改成 push 自动部署也可以：把 `deploy/` 纳入版本管理，Pages 连接仓库、构建命令留空、输出目录填 `deploy`。）
+
+**首次数据搬家（一次性）**：新网址和 `file://` 是两个隔离的浏览器存储，电脑上现有的数据不会自动过去。在旧页面「导出备份」存 JSON → 打开新网址 → 「导入备份」选**合并导入**即可。搬家之后固定用新网址，别再回旧页面记账。
+
+**手机端建议**：Android Chrome 打开网址 → 菜单 →「添加到主屏幕」，之后像 App 一样点开；同时大幅降低浏览器清掉本地存储的概率。
+
+---
+
 ## 技术栈与运行原理
 
 | 项 | 说明 |
@@ -441,9 +473,12 @@ const useNewFormat = forceFormat2 || text.includes('#');
 | 动画 | CSS keyframes（脉冲、滑入）+ 手写 enter/exit 过渡（`*.collapse-enter` 等类名） |
 
 ```
-D:\[测试笔刷\
-├── flower-tracker.html    ← 全部代码（约 4200 行）
-└── README.md              ← 本文件
+D:\[测试笔刷\（或 D:\Code\flower-tracker）
+├── flower-tracker.html    ← 全部源码（约 4800 行，本地双击即用）
+├── README.md              ← 本文件
+├── build-deploy.js        ← 部署版构建脚本（预编译 + 内联 + 口令）
+├── vendor/                ← 构建依赖缓存（gitignore，见「部署」章节）
+└── deploy/index.html      ← 构建产物（gitignore 前请先确认部署方式）
 ```
 
 代码内部按注释分块组织，主要模块（都在同一个 `<script type="text/babel">` 里）：
@@ -456,7 +491,7 @@ D:\[测试笔刷\
 | 备份工具 | `buildBackup` `parseBackup` `mergeAccountList` `mergeGoals` `encodeShare` `decodeShare` `pushSnapshot` `fmtBackupTime` |
 | 双色花工具 | `getDualColorTargets` `extractColorsFromName` `isDualColorFlower` `getRareTargetsFromDual` |
 | 收集统计 | `getFlowerWiltCount14Days` `getEstimatedDays` `getAccountFlowerStats` `addToCollection` |
-| 日历 | `getCalendarData` `getWiltDate` `getTodayStart` `getExpiredCount` |
+| 日历 | `getCalendarData` `getWiltDate` `getTodayStart` |
 | 提醒 | `addToast` `playBeep` `playWiltedBeep` `flashTitle` `getAudioCtx` + 轮询 `useEffect` |
 | 备份面板 | `exportData` `importData` `applyBackup` `generateShareCode` `importShareCode` `loadSnapshots` `restoreSnapshot` |
 | 组件 | `ThemeToggle` `AnimatedNumber` `App` |
