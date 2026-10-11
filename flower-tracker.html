@@ -263,6 +263,16 @@
     const TODAY_IDS_KEY = "xhx-revived-today-ids";
     const SNAPSHOT_KEY = "xhx-autobackup-v2";
 
+    // ========== 云同步配置（同步地址 / 口令 / 设备名是本机配置，不随快照走） ==========
+    const SYNC_URL_KEY = "xhx-sync-url";
+    const SYNC_TOKEN_KEY = "xhx-sync-token";
+    const SYNC_DEVICE_KEY = "xhx-sync-device";
+    const SYNC_ON_KEY = "xhx-sync-on";
+    const SYNC_STATE_KEY = "xhx-sync-state";   // { rev, json, at }：上次与云端对齐时的版本与本机内容
+    const SYNC_POLL_MS = 90 * 1000;            // 定时拉取间隔
+    const SYNC_PUSH_DEBOUNCE_MS = 2500;        // 改动后延迟推送（把连续修改合并成一次）
+    const SYNC_FETCH_TIMEOUT_MS = 12000;
+
     // ========== 备份 / 同步常量 ==========
     const BACKUP_APP = "flower-tracker";
     const BACKUP_VERSION = 2;
@@ -1638,6 +1648,381 @@
         const t = setTimeout(() => setBackupMsg(null), 6000);
         return () => clearTimeout(t);
       }, [backupMsg]);
+
+      // ========== 云同步：整份快照 + 版本号（LWW，冲突时让用户选） ==========
+      // 同步区：账号 / 收集目标 / 今日额度（含 todayWiltIds）/ 不着急标记。
+      // 本地区（各设备独立）：主题、排序、折叠、置顶、提醒、自动快照、同步配置本身。
+      // 语义：本机改动 → 延迟推送到云端（带 baseRev 乐观锁）；
+      //       云端有更新 → 本机没改动就直接采纳，有改动就弹冲突窗让用户决定谁覆盖谁。
+      const [syncUrl, setSyncUrl] = useState(() => localStorage.getItem(SYNC_URL_KEY) || "");
+      const [syncToken, setSyncToken] = useState(() => localStorage.getItem(SYNC_TOKEN_KEY) || "");
+      const [syncDevice, setSyncDevice] = useState(() => localStorage.getItem(SYNC_DEVICE_KEY) || "");
+      const [syncOn, setSyncOn] = useState(() => localStorage.getItem(SYNC_ON_KEY) === "1");
+      const [syncStatus, setSyncStatus] = useState({ phase: "idle", at: null, rev: null, err: null });
+      const [syncConflict, setConflictStateRaw] = useState(null); // { rev, updatedAt, device, payload }
+
+      function setConflictState(c) {
+        syncConflictRef.current = c;
+        setConflictStateRaw(c);
+      }
+
+      const syncRevRef = React.useRef(0);            // 已知的云端版本号
+      const syncLastJsonRef = React.useRef(null);    // 与云端对齐时的本机内容（ canonical json ）
+      const syncReadyRef = React.useRef(false);      // 首次拉取是否完成（完成前不自动推送，防误覆盖）
+      const syncBusyRef = React.useRef(false);       // 拉取 / 推送防重入
+      const syncPushTimerRef = React.useRef(null);
+      const syncDismissedRevRef = React.useRef(0);   // 用户点「稍后」的冲突版本，自动拉取不再打扰
+      const syncEnabledRef = React.useRef(false);
+      const syncConflictRef = React.useRef(null);    // state 的镜像，异步回调里读的是最新值
+
+      // 快照内容只从 localStorage 读：与渲染时机无关，任何回调（定时器 / pagehide）取到的都是最新值。
+      // 字段顺序固定，两边用同一份代码生成，json 字符串可直接比较。
+      function buildSyncPayload() {
+        const today = new Date().toDateString();
+        const t = readJSON(TODAY_KEY, null);
+        const ids = readJSON(TODAY_IDS_KEY, null);
+        return {
+          _app: BACKUP_APP,
+          _kind: "sync",
+          _version: 1,
+          accounts: readJSON(STORAGE_KEY, []),
+          collectionGoals: stripSelected(readJSON(COLLECTION_KEY, {})),
+          today: t && t.date === today ? { date: today, count: t.count || 0 } : { date: today, count: 0 },
+          todayIds: ids && ids.date === today
+            ? { date: today, ids: Array.isArray(ids.ids) ? ids.ids : [], todayWiltIds: Array.isArray(ids.todayWiltIds) ? ids.todayWiltIds : [] }
+            : { date: today, ids: [], todayWiltIds: [] },
+          lowPriorityKinds: readJSON(LOW_PRIORITY_KEY, []),
+        };
+      }
+      function syncCanonicalJson() { return JSON.stringify(buildSyncPayload()); }
+
+      function persistSyncState(rev, json) {
+        writeJSON(SYNC_STATE_KEY, { rev, json, at: Date.now() });
+      }
+
+      function deviceName() {
+        return localStorage.getItem(SYNC_DEVICE_KEY) || "未知设备";
+      }
+
+      async function syncFetch(url, options = {}) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), SYNC_FETCH_TIMEOUT_MS);
+        try {
+          return await fetch(url, { ...options, signal: ctrl.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      function friendlySyncErr(e) {
+        if (e && (e.name === "AbortError" || /aborted/i.test(e.message || ""))) return "连接超时";
+        if (e instanceof TypeError || /fetch|network/i.test(e.message || "")) return "连不上同步服务";
+        return e && e.message ? e.message : "未知错误";
+      }
+
+      function syncEndpoint() {
+        return (localStorage.getItem(SYNC_URL_KEY) || "").replace(/\/+$/, "") + "/snapshot";
+      }
+
+      // 把云端快照落到本机（先写存储再改状态，持久化 effect 会原样再写一遍，无副作用）
+      function applySyncPayload(p) {
+        const accs = Array.isArray(p.accounts) ? p.accounts.map(a => ({
+          id: a.id || uid(),
+          accountId: a.accountId,
+          flowers: (a.flowers || []).map(f => ({ ...f, id: f.id || uid() })),
+        })) : [];
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(accs));
+        setAccounts(accs);
+
+        const goals = stripSelected(p.collectionGoals || {});
+        localStorage.setItem(COLLECTION_KEY, JSON.stringify(goals));
+        setCollectionGoals(goals);
+
+        const today = new Date().toDateString();
+        const t = p.today && p.today.date === today ? p.today : { date: today, count: 0 };
+        localStorage.setItem(TODAY_KEY, JSON.stringify(t));
+        setTodayRevived(t.count || 0);
+
+        const ids = p.todayIds && p.todayIds.date === today
+          ? p.todayIds
+          : { date: today, ids: [], todayWiltIds: [] };
+        localStorage.setItem(TODAY_IDS_KEY, JSON.stringify({
+          date: today,
+          ids: Array.isArray(ids.ids) ? ids.ids : [],
+          todayWiltIds: Array.isArray(ids.todayWiltIds) ? ids.todayWiltIds : [],
+        }));
+        setRevivedTodayIds(new Set(Array.isArray(ids.ids) ? ids.ids : []));
+        setRevivedTodayBatchIds(new Set(Array.isArray(ids.todayWiltIds) ? ids.todayWiltIds : []));
+
+        const lp = Array.isArray(p.lowPriorityKinds) ? p.lowPriorityKinds : [];
+        localStorage.setItem(LOW_PRIORITY_KEY, JSON.stringify(lp));
+        setLowPriorityKinds(new Set(lp));
+      }
+
+      function adoptRemote(payload, rev) {
+        applySyncPayload(payload || {});
+        const json = syncCanonicalJson();
+        syncRevRef.current = rev;
+        syncLastJsonRef.current = json;
+        persistSyncState(rev, json);
+        setSyncStatus({ phase: "ok", at: Date.now(), rev, err: null });
+      }
+
+      async function doPush(json, baseRev) {
+        if (!syncEnabledRef.current || syncBusyRef.current) return;
+        syncBusyRef.current = true;
+        setSyncStatus(s => ({ ...s, phase: "syncing" }));
+        try {
+          const res = await syncFetch(syncEndpoint(), {
+            method: "PUT",
+            headers: { "content-type": "application/json", "X-Sync-Token": localStorage.getItem(SYNC_TOKEN_KEY) || "" },
+            body: JSON.stringify({ baseRev, device: deviceName(), payload: JSON.parse(json) }),
+          });
+          if (res.status === 401) throw new Error("同步口令不对");
+          if (res.status === 409) {
+            const c = await res.json();
+            setConflictState({ rev: c.rev || 0, updatedAt: c.updatedAt || null, device: c.device || null, payload: c.payload || null });
+            setSyncStatus({ phase: "conflict", at: Date.now(), rev: c.rev || 0, err: null });
+            return;
+          }
+          if (!res.ok) throw new Error("服务返回 " + res.status);
+          const data = await res.json();
+          syncRevRef.current = data.rev;
+          syncLastJsonRef.current = json;
+          persistSyncState(data.rev, json);
+          setConflictState(null);
+          setSyncStatus({ phase: "ok", at: Date.now(), rev: data.rev, err: null });
+        } catch (e) {
+          setSyncStatus({ phase: "err", at: Date.now(), rev: syncRevRef.current, err: friendlySyncErr(e) });
+        } finally {
+          syncBusyRef.current = false;
+        }
+      }
+
+      function schedulePush() {
+        if (syncPushTimerRef.current) clearTimeout(syncPushTimerRef.current);
+        syncPushTimerRef.current = setTimeout(() => {
+          syncPushTimerRef.current = null;
+          const json = syncCanonicalJson();
+          if (syncLastJsonRef.current !== null && json !== syncLastJsonRef.current) {
+            doPush(json, syncRevRef.current);
+          }
+        }, SYNC_PUSH_DEBOUNCE_MS);
+      }
+
+      async function syncPull(opts = {}) {
+        if (!syncEnabledRef.current || syncBusyRef.current) return;
+        syncBusyRef.current = true;
+        setSyncStatus(s => ({ ...s, phase: "syncing" }));
+        try {
+          const res = await syncFetch(syncEndpoint(), {
+            headers: { "X-Sync-Token": localStorage.getItem(SYNC_TOKEN_KEY) || "" },
+          });
+          if (res.status === 401) throw new Error("同步口令不对");
+          if (!res.ok) throw new Error("服务返回 " + res.status);
+          const data = await res.json();
+          syncReadyRef.current = true;
+          const rev = data.rev || 0;
+          const localJson = syncCanonicalJson();
+          const hadSyncedBefore = !!readJSON(SYNC_STATE_KEY, null);
+          const localEmpty = !hadSyncedBefore && (buildSyncPayload().accounts || []).length === 0;
+
+          if (!data.payload) {
+            // 云端还是空的：本机有数据就推上去（首次启用的上传）；
+            // 空设备不推，避免把「空快照」推成第 1 版，给真正有数据的设备制造假冲突
+            syncRevRef.current = 0;
+            const localAccs = buildSyncPayload().accounts || [];
+            if (localAccs.length > 0) {
+              await doPush(localJson, 0);
+            } else {
+              setSyncStatus({ phase: "ok", at: Date.now(), rev: 0, err: null });
+            }
+            return;
+          }
+
+          if (rev === syncRevRef.current) {
+            // 云端没变：本机若有未同步改动就补推（跨页面重开 / 推送失败后的自愈）
+            if (localJson !== syncLastJsonRef.current) {
+              schedulePush();
+            } else {
+              setSyncStatus({ phase: "ok", at: Date.now(), rev, err: null });
+            }
+            return;
+          }
+
+          if (rev < syncRevRef.current) {
+            setSyncStatus({ phase: "err", at: Date.now(), rev: syncRevRef.current, err: "云端版本异常，已跳过" });
+            return;
+          }
+
+          // 云端有新版本
+          if (localEmpty) {
+            // 从没同步过的空设备：直接采纳云端
+            adoptRemote(data.payload, rev);
+            return;
+          }
+
+          const remoteJson = JSON.stringify(data.payload);
+          if (remoteJson === localJson) {
+            // 内容其实一致：只认版本号
+            syncRevRef.current = rev;
+            syncLastJsonRef.current = localJson;
+            persistSyncState(rev, localJson);
+            setSyncStatus({ phase: "ok", at: Date.now(), rev, err: null });
+            return;
+          }
+
+          if (syncLastJsonRef.current !== null && localJson !== syncLastJsonRef.current) {
+            // 本机有未同步改动 + 云端有更新 → 冲突，让用户选
+            if (!opts.force && syncDismissedRevRef.current === rev) {
+              setSyncStatus({ phase: "ok", at: Date.now(), rev, err: null });
+              return;
+            }
+            setConflictState({ rev, updatedAt: data.updatedAt || null, device: data.device || null, payload: data.payload });
+            setSyncStatus({ phase: "conflict", at: Date.now(), rev, err: null });
+            return;
+          }
+
+          // 本机没有未同步改动：直接采纳云端
+          adoptRemote(data.payload, rev);
+        } catch (e) {
+          setSyncStatus({ phase: "err", at: Date.now(), rev: syncRevRef.current, err: friendlySyncErr(e) });
+        } finally {
+          syncBusyRef.current = false;
+        }
+      }
+
+      // 冲突：用本机覆盖云端（带着云端当前版本号强推）
+      async function resolveConflictKeepLocal() {
+        const c = syncConflict;
+        if (!c) return;
+        setConflictState(null);
+        syncDismissedRevRef.current = 0;
+        await doPush(syncCanonicalJson(), c.rev);
+      }
+
+      // 冲突：用云端覆盖本机（本机改动先自动快照一份，可从备份面板找回）
+      function resolveConflictUseRemote() {
+        const c = syncConflict;
+        if (!c) return;
+        setConflictState(null);
+        syncDismissedRevRef.current = 0;
+        const cur = localStorage.getItem(STORAGE_KEY);
+        if (cur) { pushSnapshot(cur); loadSnapshots(); }
+        adoptRemote(c.payload, c.rev);
+        setBackupMsg({ type: "ok", text: "已采用云端数据覆盖本机（覆盖前的本机数据留了一份在自动快照里）。" });
+      }
+
+      function dismissConflict() {
+        const c = syncConflict;
+        if (c) syncDismissedRevRef.current = c.rev;
+        setConflictState(null);
+        setSyncStatus(s => ({ ...s, phase: "ok", at: Date.now(), rev: syncRevRef.current, err: null }));
+      }
+
+      // 手动「立即同步」：先拉后推；冲突时弹窗（手动操作不受「稍后」抑制）
+      async function manualSyncNow() {
+        await syncPull({ force: true });
+        if (syncConflictRef.current) return; // 冲突已弹窗，等用户选择，不要拿旧版本号盲推
+        if (!syncEnabledRef.current || syncBusyRef.current) return;
+        const json = syncCanonicalJson();
+        if (syncLastJsonRef.current !== null && json !== syncLastJsonRef.current) {
+          await doPush(json, syncRevRef.current);
+        }
+      }
+
+      // 手动「上传本机」：不看云端内容，直接覆盖
+      async function forceUploadNow() {
+        if (!syncEnabledRef.current || syncBusyRef.current) return;
+        syncBusyRef.current = true;
+        setSyncStatus(s => ({ ...s, phase: "syncing" }));
+        try {
+          const res = await syncFetch(syncEndpoint(), {
+            headers: { "X-Sync-Token": localStorage.getItem(SYNC_TOKEN_KEY) || "" },
+          });
+          if (res.status === 401) throw new Error("同步口令不对");
+          if (!res.ok) throw new Error("服务返回 " + res.status);
+          const data = await res.json();
+          syncReadyRef.current = true;
+          syncBusyRef.current = false;
+          await doPush(syncCanonicalJson(), data.rev || 0);
+          return;
+        } catch (e) {
+          syncBusyRef.current = false;
+          setSyncStatus({ phase: "err", at: Date.now(), rev: syncRevRef.current, err: friendlySyncErr(e) });
+        }
+      }
+
+      function saveSyncConfig() {
+        const url = syncUrl.trim().replace(/\/+$/, "");
+        const token = syncToken.trim();
+        if (!/^https:\/\//.test(url)) {
+          setBackupMsg({ type: "err", text: "同步地址要以 https:// 开头（Worker 的域名）。" });
+          return;
+        }
+        if (!token) {
+          setBackupMsg({ type: "err", text: "请填写同步口令（和 Worker 里设置的 SYNC_TOKEN 一致）。" });
+          return;
+        }
+        const dev = syncDevice.trim() || ("设备-" + uid().slice(0, 4));
+        localStorage.setItem(SYNC_URL_KEY, url);
+        localStorage.setItem(SYNC_TOKEN_KEY, token);
+        localStorage.setItem(SYNC_DEVICE_KEY, dev);
+        localStorage.setItem(SYNC_ON_KEY, "1");
+        setSyncDevice(dev);
+        setSyncOn(true);
+        setBackupMsg({ type: "ok", text: "云同步已启用，正在连接云端…" });
+      }
+
+      function disableSync() {
+        localStorage.setItem(SYNC_ON_KEY, "0");
+        setSyncOn(false);
+        setBackupMsg({ type: "ok", text: "云同步已停用（配置保留，随时可重新启用）。" });
+      }
+
+      // 首次把当前内容记为「与云端对齐的基线」；之后内容再变才算有未同步改动
+      useEffect(() => {
+        if (!loaded) return;
+        const json = syncCanonicalJson();
+        if (syncLastJsonRef.current === null) {
+          const saved = readJSON(SYNC_STATE_KEY, null);
+          syncLastJsonRef.current = saved && typeof saved.json === "string" ? saved.json : json;
+          syncRevRef.current = saved && typeof saved.rev === "number" ? saved.rev : 0;
+          return;
+        }
+        if (!syncEnabledRef.current) return;
+        if (json === syncLastJsonRef.current) return;
+        schedulePush();
+      }, [loaded, accounts, collectionGoals, todayRevived, revivedTodayIds, revivedTodayBatchIds, lowPriorityKinds]);
+
+      // 同步生命周期：启用即拉取，之后定时拉取；切到前台拉取、切后台前把改动推上去
+      useEffect(() => {
+        syncEnabledRef.current = syncOn;
+        if (!syncOn) return undefined;
+        syncPull();
+        const iv = setInterval(() => {
+          if (document.visibilityState === "hidden") return;
+          syncPull();
+        }, SYNC_POLL_MS);
+        const onVis = () => {
+          if (document.visibilityState === "visible") {
+            syncPull();
+          } else {
+            const json = syncCanonicalJson();
+            if (syncLastJsonRef.current !== null && json !== syncLastJsonRef.current) {
+              doPush(json, syncRevRef.current);
+            }
+          }
+        };
+        document.addEventListener("visibilitychange", onVis);
+        return () => {
+          clearInterval(iv);
+          document.removeEventListener("visibilitychange", onVis);
+        };
+      }, [syncOn]);
+
+      // 渲染期算一次「是否有未同步改动」，给面板状态行用
+      const syncUnsynced = syncOn && syncLastJsonRef.current !== null && syncCanonicalJson() !== syncLastJsonRef.current;
 
       // ========== 日历辅助函数 ==========
       function getWiltDate(ts, durationMs) {
@@ -4640,6 +5025,81 @@
                   }}>{backupMsg.text}</div>
                 )}
 
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>云同步 · 多设备自动对齐</div>
+                {syncOn ? (
+                  <>
+                    <div style={{
+                      fontSize: 12, lineHeight: 1.7, borderRadius: 8, padding: "8px 12px", marginBottom: 8,
+                      background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+                    }}>
+                      <span style={{
+                        color: syncStatus.phase === "err" ? C.wilted
+                          : syncStatus.phase === "syncing" ? C.urgent
+                          : syncStatus.phase === "conflict" ? C.urgent
+                          : C.alive,
+                      }}>
+                        {syncStatus.phase === "syncing" ? "⟳ 同步中…"
+                          : syncStatus.phase === "err" ? "✕ " + (syncStatus.err || "同步出错")
+                          : syncStatus.phase === "conflict" ? "两份数据不一致，等你决定"
+                          : syncStatus.phase === "ok" ? "✓ 已连接" : "已启用"}
+                      </span>
+                      <span style={{ color: C.muted, marginLeft: 8 }}>
+                        云端第 {syncStatus.rev != null ? syncStatus.rev : syncRevRef.current} 版
+                        {syncStatus.at ? " · " + fmtBackupTime(new Date(syncStatus.at).toISOString()) : ""}
+                      </span>
+                      {syncUnsynced && <span style={{ color: C.urgent, marginLeft: 8 }}>· 有未同步改动</span>}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>本机设备名：{deviceName()}</div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <button onClick={manualSyncNow} style={{ ...btn(C.alive), flex: 1, fontSize: 13 }}>⟳ 立即同步</button>
+                      <button onClick={forceUploadNow} title="不看云端内容，直接用本机数据覆盖（云端旧版本无法找回）" style={{ ...btn(C.urgent), flex: 1, fontSize: 13 }}>↑ 用本机覆盖云端</button>
+                    </div>
+                    <button onClick={disableSync} style={{ ...btn(C.muted), width: "100%", fontSize: 13, marginBottom: 18 }}>停用云同步</button>
+                  </>
+                ) : (
+                  <>
+                    <input
+                      value={syncUrl}
+                      onChange={e => setSyncUrl(e.target.value)}
+                      placeholder="同步地址（Worker 域名，如 https://flower-sync.xxx.workers.dev）"
+                      style={{
+                        width: "100%", boxSizing: "border-box", marginBottom: 8, padding: "9px 12px",
+                        borderRadius: 8, border: `1px solid ${C.border}`, background: C.inputBg,
+                        color: C.text, fontSize: 13, outline: "none", fontFamily: "inherit",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <input
+                        value={syncToken}
+                        onChange={e => setSyncToken(e.target.value)}
+                        type="password"
+                        placeholder="同步口令"
+                        style={{
+                          flex: 1, minWidth: 0, padding: "9px 12px", borderRadius: 8,
+                          border: `1px solid ${C.border}`, background: C.inputBg,
+                          color: C.text, fontSize: 13, outline: "none", fontFamily: "inherit",
+                        }}
+                      />
+                      <input
+                        value={syncDevice}
+                        onChange={e => setSyncDevice(e.target.value)}
+                        placeholder="设备名（可空）"
+                        style={{
+                          flex: 1, minWidth: 0, padding: "9px 12px", borderRadius: 8,
+                          border: `1px solid ${C.border}`, background: C.inputBg,
+                          color: C.text, fontSize: 13, outline: "none", fontFamily: "inherit",
+                        }}
+                      />
+                    </div>
+                    <button onClick={saveSyncConfig} style={{ ...btn(C.alive), width: "100%", fontSize: 13, marginBottom: 8 }}>保存并启用云同步</button>
+                    <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.7, marginBottom: 18 }}>
+                      需要先部署配套的云函数（仓库里的 sync-worker.js，Cloudflare 免费额度足够）。<br />
+                      同步的内容：账号、收集目标、今日额度、不着急标记。<br />
+                      主题、排序、折叠、置顶、提醒仍然各设备各自独立。
+                    </div>
+                  </>
+                )}
+
                 <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>文件备份</div>
                 <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
                   <button onClick={exportData} style={{ ...btn(C.accent), flex: 1, fontSize: 13 }}>💾 导出为 JSON</button>
@@ -4769,6 +5229,64 @@
               </div>
             </div>
           )}
+
+          {syncConflict && (() => {
+            const rp = syncConflict.payload || {};
+            const remoteAccounts = rp.accounts || [];
+            const remoteFlowers = remoteAccounts.reduce((s, a) => s + ((a.flowers || []).length), 0);
+            const remoteGoals = Object.keys(rp.collectionGoals || {}).length;
+            const localP = buildSyncPayload();
+            const localAccounts = localP.accounts || [];
+            const localFlowers = localAccounts.reduce((s, a) => s + ((a.flowers || []).length), 0);
+            const localGoals = Object.keys(localP.collectionGoals || {}).length;
+            const rowStyle = {
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "7px 10px", borderRadius: 6, marginBottom: 6,
+              background: isDark ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.03)",
+            };
+            return (
+              <div
+                onClick={dismissConflict}
+                style={{
+                  position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  zIndex: 420, padding: 16,
+                }}
+              >
+                <div
+                  onClick={e => e.stopPropagation()}
+                  style={{
+                    background: C.modalBg, border: `1px solid ${C.accentDim}`,
+                    borderRadius: 12, padding: 20, width: "100%", maxWidth: 400, color: C.text,
+                  }}
+                >
+                  <div style={{ fontSize: 16, fontWeight: 700, color: C.urgent, marginBottom: 8 }}>⚠️ 两端数据不一致</div>
+                  <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.7, marginBottom: 10 }}>
+                    云端第 {syncConflict.rev} 版由「{syncConflict.device || "未知设备"}」
+                    于 {syncConflict.updatedAt ? fmtBackupTime(syncConflict.updatedAt) : "未知时间"} 更新，
+                    而本机也有还没同步上去的改动。选一份为准：
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={rowStyle}>
+                      <span style={{ color: C.urgent, fontSize: 12 }}>☁️ 云端这份</span>
+                      <span style={{ color: C.text, fontSize: 12 }}>{remoteAccounts.length} 账号 · {remoteFlowers} 种花 · {remoteGoals} 目标</span>
+                    </div>
+                    <div style={{ ...rowStyle, marginBottom: 0 }}>
+                      <span style={{ color: C.alive, fontSize: 12 }}>📱 本机这份</span>
+                      <span style={{ color: C.text, fontSize: 12 }}>{localAccounts.length} 账号 · {localFlowers} 种花 · {localGoals} 目标</span>
+                    </div>
+                  </div>
+                  <button onClick={resolveConflictKeepLocal} style={{ ...btn(C.urgent), width: "100%", fontSize: 13, marginBottom: 8 }}>
+                    ↑ 用本机覆盖云端
+                  </button>
+                  <button onClick={resolveConflictUseRemote} style={{ ...btn(C.alive), width: "100%", fontSize: 13, marginBottom: 8 }}>
+                    ↓ 用云端覆盖本机（本机改动先自动快照）
+                  </button>
+                  <button onClick={dismissConflict} style={{ ...btn(C.muted), width: "100%", fontSize: 13 }}>稍后再说</button>
+                </div>
+              </div>
+            );
+          })()}
 
           {showBackToTop && (
             <button

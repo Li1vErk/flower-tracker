@@ -459,6 +459,33 @@ node build-deploy.js 你的口令
 
 ---
 
+## 多设备云同步（自动对齐）
+
+在「备份与同步 → 云同步」里填 Worker 地址和同步口令即可启用。数据模型是**整份快照 + 版本号（乐观锁）**：
+
+- 本机有改动 → 2.5 秒后自动推送到云端；云端有更新 → 本机没改动就直接采纳；
+- 两边都改过（冲突）→ 弹窗让你选「用本机覆盖云端」还是「用云端覆盖本机」（选云端前本机改动会先自动快照一份，可从下方找回）；
+- 页面切到后台前会把未推送的改动先推上去；打开页面和每 90 秒会自动拉取。
+
+| 同步的内容 | 各设备独立的内容 |
+| --- | --- |
+| 账号与花朵、收集目标、**今日额度**（含今日枯萎记录）、「不着急」标记 | 主题、排序、折叠、置顶、提醒、自动快照、同步配置 |
+
+> 今日额度必须随同步走：否则电脑复活 12、手机还能再复活 30，游戏里实际只奖励 30 朵。
+
+**部署同步端（Cloudflare Worker + KV，免费额度足够个人用，全程面板点鼠标）：**
+
+1. Cloudflare 控制台 → Workers & Pages → Create → Worker，起名（如 `flower-sync`）→ Deploy；
+2. Edit code → 把仓库里 `sync-worker.js` 的内容整份粘贴进去 → Deploy；
+3. Storage & Databases → KV → Create namespace（名字随意）；
+4. Worker → Settings → Bindings → Add → KV namespace：变量名填 `SYNC_KV`，选刚建的 namespace；
+5. Worker → Settings → Variables and Secrets → Add → Secret：变量名填 `SYNC_TOKEN`，值是一段只有自己知道的口令；
+6. 浏览器打开 Worker 域名，看到「flower-tracker sync worker is running」即部署完成。
+
+然后在网页的「云同步」里填：同步地址 = Worker 域名；同步口令 = `SYNC_TOKEN`；设备名可空（自动生成）。
+
+---
+
 ## 技术栈与运行原理
 
 | 项 | 说明 |
@@ -474,9 +501,10 @@ node build-deploy.js 你的口令
 
 ```
 D:\[测试笔刷\（或 D:\Code\flower-tracker）
-├── flower-tracker.html    ← 全部源码（约 4800 行，本地双击即用）
+├── flower-tracker.html    ← 全部源码（约 5000 行，本地双击即用）
 ├── README.md              ← 本文件
 ├── build-deploy.js        ← 部署版构建脚本（预编译 + 内联 + 口令）
+├── sync-worker.js         ← 云同步 Worker（部署到 Cloudflare，见「多设备云同步」章节）
 ├── vendor/                ← 构建依赖缓存（gitignore，见「部署」章节）
 └── deploy/index.html      ← 构建产物（gitignore 前请先确认部署方式）
 ```
@@ -489,6 +517,7 @@ D:\[测试笔刷\（或 D:\Code\flower-tracker）
 | 工具函数 | `parseInput` `remMs` `fmtRem` `fmtDate` `status` `uid` `pill` `btn` `tinyBtn` `codeBox` |
 | 存储工具 | `readJSON` `writeJSON` `stableFlowerKey` `stripSelected` |
 | 备份工具 | `buildBackup` `parseBackup` `mergeAccountList` `mergeGoals` `encodeShare` `decodeShare` `pushSnapshot` `fmtBackupTime` |
+| 云同步 | `buildSyncPayload` `syncPull` `doPush` `applySyncPayload` `adoptRemote` `resolveConflict*`（整份快照 + rev 乐观锁 + 冲突弹窗） |
 | 双色花工具 | `getDualColorTargets` `extractColorsFromName` `isDualColorFlower` `getRareTargetsFromDual` |
 | 收集统计 | `getFlowerWiltCount14Days` `getEstimatedDays` `getAccountFlowerStats` `addToCollection` |
 | 日历 | `getCalendarData` `getWiltDate` `getTodayStart` |
