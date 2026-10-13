@@ -268,8 +268,9 @@
     const SYNC_TOKEN_KEY = "xhx-sync-token";
     const SYNC_DEVICE_KEY = "xhx-sync-device";
     const SYNC_ON_KEY = "xhx-sync-on";
-    const SYNC_STATE_KEY = "xhx-sync-state";   // { rev, json, at }：上次与云端对齐时的版本与本机内容
-    const SYNC_POLL_MS = 90 * 1000;            // 定时拉取间隔
+    const SYNC_STATE_KEY = "xhx-sync-state";   // { rev, json, at, meta }：上次与云端对齐时的版本、本机内容、同步元信息
+    const SYNC_HEARTBEAT_MS = 20 * 1000;       // 轻量心跳间隔：只问版本号（约 80 字节），变了才拉全量
+    const SYNC_POLL_MS = 3 * 60 * 1000;        // 全量兜底拉取间隔（心跳之外的低频保险）
     const SYNC_PUSH_DEBOUNCE_MS = 2500;        // 改动后延迟推送（把连续修改合并成一次）
     const SYNC_FETCH_TIMEOUT_MS = 12000;
 
@@ -279,6 +280,7 @@
     const SNAPSHOT_MAX = 3;
     const SNAPSHOT_MAX_BYTES = 500 * 1024;
     const SHARE_PREFIX = "FT2|";
+    const SHARE_LENGTH_HINT = 3000;   // 分享码超过这个字符数就提示改用文件导出（微信/QQ 粘贴容易换行或截断）
 
     // ========== 本地存储读写 ==========
     function readJSON(key, fallback) {
@@ -397,6 +399,19 @@
       if (isNaN(d.getTime())) return "未知时间";
       const p = n => String(n).padStart(2, "0");
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    // 相对时间：同步状态行用（「12 秒前」「3 分钟前」），比绝对时间更容易看出是否卡住
+    function fmtAgo(ts) {
+      if (!ts) return "—";
+      const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+      if (s < 5) return "刚刚";
+      if (s < 60) return s + " 秒前";
+      const m = Math.round(s / 60);
+      if (m < 60) return m + " 分钟前";
+      const h = Math.round(m / 60);
+      if (h < 24) return h + " 小时前";
+      return Math.round(h / 24) + " 天前";
     }
 
     // ========== 分享码（LZ-String 压缩，缺失时降级为 base64） ==========
@@ -1443,11 +1458,12 @@
         localStorage.setItem(REMINDER_KEY, JSON.stringify(Array.from(newSet)));
       }
 
-      // ========== 备份：导出 ==========
+      // ========== 备份：导出（范围与分享码共用 shareScope） ==========
       function exportData() {
-        const payload = buildBackup();
-        if (!payload.accounts.length) {
-          setBackupMsg({ type: "err", text: "还没有任何账号数据，先添加账号再导出。" });
+        const scope = shareScope || "full";
+        const payload = buildBackup(scope);
+        if (scope !== "prefs" && !payload.accounts.length) {
+          setBackupMsg({ type: "err", text: "还没有任何账号数据，先添加账号再导出（或把范围切成「仅设置」）。" });
           return;
         }
         const json = JSON.stringify(payload, null, 2);
@@ -1457,15 +1473,18 @@
         a.href = url;
         const d = new Date();
         const p = n => String(n).padStart(2, "0");
-        a.download = `花园复活追踪备份_${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}.json`;
+        const scopeTag = scope === "accounts" ? "仅账号" : scope === "prefs" ? "仅设置" : "全量";
+        a.download = `花园复活追踪备份_${scopeTag}_${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         const goalCount = Object.keys(payload.collectionGoals).length;
+        const sizeKb = Math.max(1, Math.round(json.length / 1024));
         setBackupMsg({
           type: "ok",
-          text: `已导出 ${payload.accounts.length} 个账号 · ${goalCount} 个收集目标 · 含提醒/折叠/排序/主题设置。`,
+          text: `已导出（${scopeTag}，约 ${sizeKb} KB）：${payload.accounts.length} 个账号 · ${goalCount} 个收集目标`
+            + (scope === "accounts" ? "。" : " · 含提醒/折叠/排序/主题设置。"),
         });
       }
 
@@ -1674,6 +1693,21 @@
       const syncDismissedRevRef = React.useRef(0);   // 用户点「稍后」的冲突版本，自动拉取不再打扰
       const syncEnabledRef = React.useRef(false);
       const syncConflictRef = React.useRef(null);    // state 的镜像，异步回调里读的是最新值
+      const syncPushPendingRef = React.useRef(false); // 忙时被撞掉的推送，忙完补推
+
+      // 同步元信息：谁的数据、什么时候检查/拉取/推送过（给面板状态行显示，能看出卡在哪一步）
+      const syncMetaRef = React.useRef({ checkedAt: null, pulledAt: null, pushedAt: null, fromDevice: null, fromAt: null });
+      const [syncMeta, setSyncMeta] = useState(syncMetaRef.current);
+      function touchSyncMeta(patch) {
+        syncMetaRef.current = { ...syncMetaRef.current, ...patch };
+        setSyncMeta(syncMetaRef.current);
+      }
+      // 忙时被撞掉的推送先记一笔，等这次同步结束再补推，不用干等下一轮
+      function retryPendingPush() {
+        if (!syncPushPendingRef.current) return;
+        syncPushPendingRef.current = false;
+        schedulePush();
+      }
 
       // 快照内容只从 localStorage 读：与渲染时机无关，任何回调（定时器 / pagehide）取到的都是最新值。
       // 字段顺序固定，两边用同一份代码生成，json 字符串可直接比较。
@@ -1697,7 +1731,7 @@
       function syncCanonicalJson() { return JSON.stringify(buildSyncPayload()); }
 
       function persistSyncState(rev, json) {
-        writeJSON(SYNC_STATE_KEY, { rev, json, at: Date.now() });
+        writeJSON(SYNC_STATE_KEY, { rev, json, at: Date.now(), meta: syncMetaRef.current });
       }
 
       function deviceName() {
@@ -1764,12 +1798,18 @@
         const json = syncCanonicalJson();
         syncRevRef.current = rev;
         syncLastJsonRef.current = json;
+        touchSyncMeta({ pulledAt: Date.now() });
         persistSyncState(rev, json);
         setSyncStatus({ phase: "ok", at: Date.now(), rev, err: null });
       }
 
       async function doPush(json, baseRev) {
-        if (!syncEnabledRef.current || syncBusyRef.current) return;
+        if (!syncEnabledRef.current) return;
+        if (syncBusyRef.current) {
+          // 正有同步在跑：把这次改动挂起，等它结束立刻补推（不用干等下一轮）
+          syncPushPendingRef.current = true;
+          return;
+        }
         syncBusyRef.current = true;
         setSyncStatus(s => ({ ...s, phase: "syncing" }));
         try {
@@ -1781,6 +1821,7 @@
           if (res.status === 401) throw new Error("同步口令不对");
           if (res.status === 409) {
             const c = await res.json();
+            touchSyncMeta({ checkedAt: Date.now(), fromDevice: c.device || null, fromAt: c.updatedAt || null });
             setConflictState({ rev: c.rev || 0, updatedAt: c.updatedAt || null, device: c.device || null, payload: c.payload || null });
             setSyncStatus({ phase: "conflict", at: Date.now(), rev: c.rev || 0, err: null });
             return;
@@ -1789,6 +1830,10 @@
           const data = await res.json();
           syncRevRef.current = data.rev;
           syncLastJsonRef.current = json;
+          touchSyncMeta({
+            checkedAt: Date.now(), pushedAt: Date.now(),
+            fromDevice: deviceName(), fromAt: data.updatedAt || new Date().toISOString(),
+          });
           persistSyncState(data.rev, json);
           setConflictState(null);
           setSyncStatus({ phase: "ok", at: Date.now(), rev: data.rev, err: null });
@@ -1796,6 +1841,7 @@
           setSyncStatus({ phase: "err", at: Date.now(), rev: syncRevRef.current, err: friendlySyncErr(e) });
         } finally {
           syncBusyRef.current = false;
+          retryPendingPush();
         }
       }
 
@@ -1823,6 +1869,8 @@
           const data = await res.json();
           syncReadyRef.current = true;
           const rev = data.rev || 0;
+          // 记下「云端这份数据是谁在什么时候推的」，并在面板上标出来
+          touchSyncMeta({ checkedAt: Date.now(), fromDevice: data.device || null, fromAt: data.updatedAt || null });
           const localJson = syncCanonicalJson();
           const hadSyncedBefore = !!readJSON(SYNC_STATE_KEY, null);
           const localEmpty = !hadSyncedBefore && (buildSyncPayload().accounts || []).length === 0;
@@ -1867,6 +1915,7 @@
             // 内容其实一致：只认版本号
             syncRevRef.current = rev;
             syncLastJsonRef.current = localJson;
+            touchSyncMeta({ pulledAt: Date.now() });
             persistSyncState(rev, localJson);
             setSyncStatus({ phase: "ok", at: Date.now(), rev, err: null });
             return;
@@ -1889,6 +1938,63 @@
           setSyncStatus({ phase: "err", at: Date.now(), rev: syncRevRef.current, err: friendlySyncErr(e) });
         } finally {
           syncBusyRef.current = false;
+          retryPendingPush();
+        }
+      }
+
+      // 轻量心跳：只问「云端版本号变了没」，变了才拉全量。
+      // 每 20 秒一次、约 80 字节，不用为了省流量把刷新间隔拉到几分钟。
+      // 心跳失败不刷错误状态（避免每 20 秒弹一次红字），由下一次全量拉取或手动同步报错。
+      async function syncHeartbeat() {
+        if (!syncEnabledRef.current || syncBusyRef.current) return;
+        try {
+          const res = await syncFetch(syncEndpoint() + "?meta=1", {
+            headers: { "X-Sync-Token": localStorage.getItem(SYNC_TOKEN_KEY) || "" },
+          });
+          if (!res.ok) return;
+          const m = await res.json();
+          const rev = m.rev || 0;
+          touchSyncMeta({ checkedAt: Date.now(), fromDevice: m.device || null, fromAt: m.updatedAt || null });
+          if (rev !== syncRevRef.current) {
+            syncPull();
+            return;
+          }
+          // 版本没变但本机有没推上去的改动 → 补推（推送失败后的自愈）
+          if (syncLastJsonRef.current !== null && syncCanonicalJson() !== syncLastJsonRef.current) {
+            schedulePush();
+          }
+        } catch (e) { /* 心跳静默失败 */ }
+      }
+
+      // 手动「从云端刷新」：不看本机改动，直接用云端数据覆盖本机（覆盖前先把本机存一份快照）
+      async function forcePullFromCloud() {
+        if (!syncEnabledRef.current || syncBusyRef.current) return;
+        syncBusyRef.current = true;
+        setSyncStatus(s => ({ ...s, phase: "syncing" }));
+        try {
+          const res = await syncFetch(syncEndpoint(), {
+            headers: { "X-Sync-Token": localStorage.getItem(SYNC_TOKEN_KEY) || "" },
+          });
+          if (res.status === 401) throw new Error("同步口令不对");
+          if (!res.ok) throw new Error("服务返回 " + res.status);
+          const data = await res.json();
+          if (!data.payload) {
+            setSyncStatus({ phase: "ok", at: Date.now(), rev: 0, err: null });
+            setBackupMsg({ type: "err", text: "云端还没有数据，先在数据完整的设备上启用同步上传一次。" });
+            return;
+          }
+          const cur = localStorage.getItem(STORAGE_KEY);
+          if (cur && (readJSON(STORAGE_KEY, []) || []).length > 0) { pushSnapshot(cur); loadSnapshots(); }
+          touchSyncMeta({ checkedAt: Date.now(), fromDevice: data.device || null, fromAt: data.updatedAt || null });
+          syncDismissedRevRef.current = 0;
+          adoptRemote(data.payload, data.rev || 0);
+          setConflictState(null);
+          setBackupMsg({ type: "ok", text: "已用云端数据刷新本机（刷新前的本机数据留了一份在下面的自动快照里）。" });
+        } catch (e) {
+          setSyncStatus({ phase: "err", at: Date.now(), rev: syncRevRef.current, err: friendlySyncErr(e) });
+        } finally {
+          syncBusyRef.current = false;
+          retryPendingPush();
         }
       }
 
@@ -1988,6 +2094,10 @@
           const saved = readJSON(SYNC_STATE_KEY, null);
           syncLastJsonRef.current = saved && typeof saved.json === "string" ? saved.json : json;
           syncRevRef.current = saved && typeof saved.rev === "number" ? saved.rev : 0;
+          if (saved && saved.meta && typeof saved.meta === "object") {
+            syncMetaRef.current = { ...syncMetaRef.current, ...saved.meta };
+            setSyncMeta(syncMetaRef.current);
+          }
           return;
         }
         if (!syncEnabledRef.current) return;
@@ -1995,29 +2105,42 @@
         schedulePush();
       }, [loaded, accounts, collectionGoals, todayRevived, revivedTodayIds, revivedTodayBatchIds, lowPriorityKinds]);
 
-      // 同步生命周期：启用即拉取，之后定时拉取；切到前台拉取、切后台前把改动推上去
+      // 同步生命周期：启用即拉取；之后 20 秒一次轻量心跳（版本变了才拉全量），
+      // 另有 3 分钟一次的全量兜底；切前台探一次、切后台/关页面前把没推的改动推上去。
       useEffect(() => {
         syncEnabledRef.current = syncOn;
         if (!syncOn) return undefined;
         syncPull();
-        const iv = setInterval(() => {
+        const hb = setInterval(() => {
+          if (document.visibilityState === "hidden") return;
+          syncHeartbeat();
+        }, SYNC_HEARTBEAT_MS);
+        const full = setInterval(() => {
           if (document.visibilityState === "hidden") return;
           syncPull();
         }, SYNC_POLL_MS);
+        const pushIfDirty = () => {
+          const json = syncCanonicalJson();
+          if (syncLastJsonRef.current !== null && json !== syncLastJsonRef.current) {
+            doPush(json, syncRevRef.current);
+          }
+        };
         const onVis = () => {
           if (document.visibilityState === "visible") {
-            syncPull();
+            syncHeartbeat();
           } else {
-            const json = syncCanonicalJson();
-            if (syncLastJsonRef.current !== null && json !== syncLastJsonRef.current) {
-              doPush(json, syncRevRef.current);
-            }
+            pushIfDirty();
           }
         };
         document.addEventListener("visibilitychange", onVis);
+        window.addEventListener("pagehide", pushIfDirty);
+        document.addEventListener("freeze", pushIfDirty);
         return () => {
-          clearInterval(iv);
+          clearInterval(hb);
+          clearInterval(full);
           document.removeEventListener("visibilitychange", onVis);
+          window.removeEventListener("pagehide", pushIfDirty);
+          document.removeEventListener("freeze", pushIfDirty);
         };
       }, [syncOn]);
 
@@ -5013,7 +5136,7 @@
                   <button onClick={() => setShowBackup(false)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 16, cursor: "pointer" }}>✕</button>
                 </div>
                 <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
-                  包含：账号与花朵、收集目标、枯萎提醒开关、折叠账号、收集排序、主题与置顶账号。
+                  云同步让多设备自动对齐；文件备份与分享码是手动搬运，可只搬账号或只搬设置。
                 </div>
 
                 {backupMsg && (
@@ -5045,15 +5168,22 @@
                       </span>
                       <span style={{ color: C.muted, marginLeft: 8 }}>
                         云端第 {syncStatus.rev != null ? syncStatus.rev : syncRevRef.current} 版
-                        {syncStatus.at ? " · " + fmtBackupTime(new Date(syncStatus.at).toISOString()) : ""}
+                        {syncMeta.fromDevice
+                          ? (syncMeta.fromDevice === deviceName()
+                            ? " · 本机推送" + (syncMeta.fromAt ? " " + fmtBackupTime(syncMeta.fromAt) : "")
+                            : " · 来自「" + syncMeta.fromDevice + "」" + (syncMeta.fromAt ? " " + fmtBackupTime(syncMeta.fromAt) : ""))
+                          : ""}
                       </span>
                       {syncUnsynced && <span style={{ color: C.urgent, marginLeft: 8 }}>· 有未同步改动</span>}
                     </div>
-                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>本机设备名：{deviceName()}</div>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                      <button onClick={manualSyncNow} style={{ ...btn(C.alive), flex: 1, fontSize: 13 }}>⟳ 立即同步</button>
-                      <button onClick={forceUploadNow} title="不看云端内容，直接用本机数据覆盖（云端旧版本无法找回）" style={{ ...btn(C.urgent), flex: 1, fontSize: 13 }}>↑ 用本机覆盖云端</button>
+                    <div style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
+                      本机设备名：{deviceName()} · 上次检查 {fmtAgo(syncMeta.checkedAt)} · 上次拉取 {fmtAgo(syncMeta.pulledAt)} · 上次推送 {fmtAgo(syncMeta.pushedAt)}
                     </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <button onClick={manualSyncNow} title="先拉云端、再把本机改动推上去（双向对齐）" style={{ ...btn(C.alive), flex: 1, fontSize: 13 }}>⟳ 立即同步</button>
+                      <button onClick={forcePullFromCloud} title="不看本机改动，直接用云端数据覆盖本机（覆盖前的本机数据会自动留一份快照）" style={{ ...btn(C.accent), flex: 1, fontSize: 13 }}>↓ 从云端刷新</button>
+                    </div>
+                    <button onClick={forceUploadNow} title="不看云端内容，直接用本机数据覆盖（云端旧版本无法找回）" style={{ ...btn(C.urgent), width: "100%", fontSize: 13, marginBottom: 8 }}>↑ 用本机覆盖云端</button>
                     <button onClick={disableSync} style={{ ...btn(C.muted), width: "100%", fontSize: 13, marginBottom: 18 }}>停用云同步</button>
                   </>
                 ) : (
@@ -5100,17 +5230,8 @@
                   </>
                 )}
 
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>文件备份</div>
-                <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-                  <button onClick={exportData} style={{ ...btn(C.accent), flex: 1, fontSize: 13 }}>💾 导出为 JSON</button>
-                  <label style={{ ...btn(C.muted), flex: 1, fontSize: 13, textAlign: "center", cursor: "pointer" }}>
-                    📂 从文件导入
-                    <input type="file" accept=".json" onChange={e => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
-                  </label>
-                </div>
-
-                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>分享码 · 跨设备粘贴同步</div>
-                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>导出范围 · 文件与分享码共用</div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                   {SHARE_SCOPES.map(s => (
                     <button
                       key={s.id}
@@ -5125,9 +5246,35 @@
                     >{s.label}</button>
                   ))}
                 </div>
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 14 }}>
+                  {(SHARE_SCOPES.find(s => s.id === shareScope) || SHARE_SCOPES[0]).hint}。范围对下面的「导出为 JSON」和「生成分享码」同时生效。
+                </div>
+
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>文件备份 · 账号多时首选</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 6 }}>
+                  <button onClick={exportData} style={{ ...btn(C.accent), flex: 1, fontSize: 13 }}>💾 导出为 JSON</button>
+                  <label style={{ ...btn(C.muted), flex: 1, fontSize: 13, textAlign: "center", cursor: "pointer" }}>
+                    📂 从文件导入
+                    <input type="file" accept=".json" onChange={e => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ""; }} style={{ display: "none" }} />
+                  </label>
+                </div>
+                <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6, marginBottom: 18 }}>
+                  导出的是文件，账号再多、体积再大都不受影响。手机上用微信/QQ 的「发送文件」传给自己，别塞进文本消息里。
+                </div>
+
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.accent, marginBottom: 8 }}>分享码 · 跨设备粘贴</div>
                 <button onClick={generateShareCode} style={{ ...btn(C.accentDim), width: "100%", fontSize: 13, marginBottom: 8 }}>🔗 生成分享码</button>
                 {shareCode && (
                   <>
+                    <div style={{
+                      fontSize: 12, lineHeight: 1.6, marginBottom: 6,
+                      color: shareCode.length > SHARE_LENGTH_HINT ? C.urgent : C.muted,
+                    }}>
+                      共 {shareCode.length} 字符
+                      {shareCode.length > SHARE_LENGTH_HINT
+                        ? " · 字符数较多，微信/QQ 里粘贴容易换行或被截断，建议改用上面的「导出为 JSON」发文件。"
+                        : ""}
+                    </div>
                     <textarea
                       readOnly
                       value={shareCode}

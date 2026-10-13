@@ -2,10 +2,12 @@
  * 花园复活追踪 · 云同步 Worker
  *
  * 一份「整份快照 + 版本号」存在 KV 里，多设备通过它对齐数据：
- *   GET  /snapshot   → { rev, updatedAt, device, payload }   （云端为空时 { rev: 0, payload: null }）
- *   PUT  /snapshot   → body { baseRev, device, payload }
- *                       baseRev 与云端一致 → 保存，rev+1，返回 { rev, updatedAt }
- *                       不一致（别的设备先写入了）→ 409，返回云端当前完整快照，由用户决定谁覆盖谁
+ *   GET  /snapshot           → { rev, updatedAt, device, payload }   （云端为空时 { rev: 0, payload: null }）
+ *   GET  /snapshot?meta=1    → { rev, updatedAt, device, meta: 1 }   （轻量心跳，约 80 字节，不含 payload）
+ *                              客户端每 20 秒探一次，版本号变了才拉全量，省流量又不用等
+ *   PUT  /snapshot           → body { baseRev, device, payload }
+ *                               baseRev 与云端一致 → 保存，rev+1，返回 { rev, updatedAt }
+ *                               不一致（别的设备先写入了）→ 409，返回云端当前完整快照，由用户决定谁覆盖谁
  *
  * 部署（全程在 Cloudflare 面板点鼠标，不用装任何东西）：
  *   1. Workers & Pages → Create → Worker → 随便起名（如 flower-sync）→ Deploy
@@ -70,6 +72,16 @@ export default {
     if (request.method === "GET") {
       const raw = await env.SYNC_KV.get("snapshot");
       if (!raw) return json({ rev: 0, payload: null });
+      // 轻量心跳：只回报版本号与来源，客户端据此决定要不要拉全量
+      if (url.searchParams.get("meta") === "1") {
+        const cur = JSON.parse(raw);
+        return json({
+          meta: 1,
+          rev: cur.rev || 0,
+          updatedAt: cur.updatedAt || null,
+          device: cur.device || null,
+        });
+      }
       // 原样透传（里面就是 { rev, updatedAt, device, payload }）
       return new Response(raw, {
         headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders },
