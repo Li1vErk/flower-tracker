@@ -610,6 +610,9 @@ const SYNC_HEARTBEAT_MS = 20 * 1000;
 const SYNC_POLL_MS = 3 * 60 * 1000;
 const SYNC_PUSH_DEBOUNCE_MS = 2500;
 const SYNC_FETCH_TIMEOUT_MS = 12000;
+const HB_TICK_MS = 10 * 1000;
+const HB_THROTTLE_MS = 20 * 1000;
+const HB_FREEZE_MS = 90 * 1000;
 const BACKUP_APP = "flower-tracker";
 const BACKUP_VERSION = 2;
 const SNAPSHOT_MAX = 3;
@@ -777,6 +780,19 @@ function fmtAgo(ts) {
   const h = Math.round(m / 60);
   if (h < 24) return h + " 小时前";
   return Math.round(h / 24) + " 天前";
+}
+function fmtDur(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + " 秒";
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m} 分 ${s % 60} 秒` : `${m} 分`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h} 小时 ${m % 60} 分` : `${h} 小时`;
+}
+function hbJudge(gap) {
+  if (gap > HB_FREEZE_MS) return "freeze";
+  if (gap > HB_THROTTLE_MS) return "throttle";
+  return "ok";
 }
 function encodeShare(payload) {
   const json = JSON.stringify(payload);
@@ -1322,6 +1338,9 @@ function App() {
   const [importText2, setImportText2] = useState("");
   const [importError, setImportError] = useState("");
   const [showBackup, setShowBackup] = useState(false);
+  const [hbVersion, setHbVersion] = useState(0);
+  const hbRef = React.useRef(null);
+  const showBackupRef = React.useRef(false);
   const [shareCode, setShareCode] = useState("");
   const [shareScope, setShareScope] = useState("full");
   const [sharePaste, setSharePaste] = useState("");
@@ -1641,6 +1660,49 @@ function App() {
       }
     };
   }, [loaded, accounts, accountReminders]);
+  useEffect(() => {
+    const hb = {
+      startedAt: Date.now(),
+      lastAt: Date.now(),
+      ticks: 0,
+      maxGap: 0,
+      maxGapAt: null,
+      freezes: 0,
+      throttles: 0
+    };
+    hbRef.current = hb;
+    window.__hb = hb;
+    const iv = setInterval(() => {
+      const now = Date.now();
+      const gap = now - hb.lastAt;
+      hb.lastAt = now;
+      hb.ticks += 1;
+      if (gap > hb.maxGap) {
+        hb.maxGap = gap;
+        hb.maxGapAt = now;
+      }
+      const kind = hbJudge(gap);
+      if (kind === "freeze") hb.freezes += 1;else if (kind === "throttle") hb.throttles += 1;
+      if (showBackupRef.current) setHbVersion(v => v + 1);
+    }, HB_TICK_MS);
+    return () => clearInterval(iv);
+  }, []);
+  useEffect(() => {
+    showBackupRef.current = showBackup;
+    if (showBackup) setHbVersion(v => v + 1);
+  }, [showBackup]);
+  function resetHb() {
+    const hb = hbRef.current;
+    if (!hb) return;
+    hb.startedAt = Date.now();
+    hb.lastAt = Date.now();
+    hb.ticks = 0;
+    hb.maxGap = 0;
+    hb.maxGapAt = null;
+    hb.freezes = 0;
+    hb.throttles = 0;
+    setHbVersion(v => v + 1);
+  }
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 20000);
     return () => clearInterval(t);
@@ -6179,7 +6241,70 @@ function App() {
       onClick: () => restoreSnapshot(snap),
       style: tinyBtn(C.urgent)
     }, "\u6062\u590D"));
-  })))), pendingRestore && React.createElement("div", {
+  })), (() => {
+    const hb = hbRef.current || {
+      startedAt: Date.now(),
+      lastAt: Date.now(),
+      ticks: 0,
+      maxGap: 0,
+      maxGapAt: null,
+      freezes: 0,
+      throttles: 0
+    };
+    const level = hb.freezes > 0 ? "freeze" : hb.throttles > 0 ? "throttle" : "ok";
+    const color = level === "freeze" ? C.wilted : level === "throttle" ? C.urgent : C.alive;
+    const label = level === "freeze" ? "曾被冻结" : level === "throttle" ? "被降频（仍在跑）" : "正常";
+    return React.createElement("div", {
+      style: {
+        borderTop: `1px solid ${C.border}`,
+        marginTop: 16,
+        paddingTop: 14
+      }
+    }, React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 6
+      }
+    }, React.createElement("span", {
+      style: {
+        fontSize: 13,
+        fontWeight: 600,
+        color: C.accent
+      }
+    }, "\u540E\u53F0\u8FD0\u884C\u8BCA\u65AD"), React.createElement("button", {
+      onClick: resetHb,
+      style: tinyBtn(C.muted)
+    }, "\u91CD\u7F6E")), React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: C.text,
+        lineHeight: 1.8
+      }
+    }, React.createElement("span", {
+      style: {
+        color
+      }
+    }, "\u25CF ", label), React.createElement("span", {
+      style: {
+        color: C.muted
+      }
+    }, "\u3000\u5DF2\u8FD0\u884C ", fmtDur(Date.now() - hb.startedAt), " \xB7 \u4E0A\u6B21\u5FC3\u8DF3 ", fmtAgo(hb.lastAt))), React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: C.muted,
+        lineHeight: 1.8
+      }
+    }, "\u6700\u957F\u95F4\u9694 ", hb.maxGap ? fmtDur(hb.maxGap) : "—", hb.maxGapAt ? `（${fmtBackupTime(new Date(hb.maxGapAt).toISOString())}）` : "", hb.freezes > 0 ? ` · 冻结 ${hb.freezes} 次` : "", hb.throttles > 0 ? ` · 降频 ${hb.throttles} 次` : ""), React.createElement("div", {
+      style: {
+        fontSize: 11.5,
+        color: C.muted,
+        lineHeight: 1.75,
+        marginTop: 4
+      }
+    }, level === "freeze" ? "最小化后页面被系统冻结过：冻结期间的提醒会攒到恢复时一起响，不会按时提醒。把本站加入 Edge「设置 → 系统和性能 → 始终使这些网站保持活动状态」可避免。" : level === "throttle" ? "最小化时浏览器把定时器降频到约 1 分钟一次（没有冻结）：提醒最多晚约 1 分钟，2 分钟档仍能命中。" : "每 10 秒一跳，最小化期间定时器在正常跑。切后台放 20 分钟以上再回来看这里，就能确认会不会休眠。"));
+  })())), pendingRestore && React.createElement("div", {
     onClick: () => setPendingRestore(null),
     style: {
       position: "fixed",

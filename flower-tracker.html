@@ -274,6 +274,14 @@
     const SYNC_PUSH_DEBOUNCE_MS = 2500;        // 改动后延迟推送（把连续修改合并成一次）
     const SYNC_FETCH_TIMEOUT_MS = 12000;
 
+    // ========== 后台运行心跳（判断最小化 / 切后台时页面有没有被冻结） ==========
+    // 独立于提醒轮询计时：只记录「相邻两次心跳的实际间隔」，不参与任何业务逻辑。
+    // 判定口径：正常 ≈10 秒；20s~90s = 后台定时器被降频（Chromium 隐藏页最多约 1 次/分钟）；
+    //          >90s = 页面确实被冻结过（sleeping tab / Energy Saver / 系统挂起）。
+    const HB_TICK_MS = 10 * 1000;
+    const HB_THROTTLE_MS = 20 * 1000;
+    const HB_FREEZE_MS = 90 * 1000;
+
     // ========== 备份 / 同步常量 ==========
     const BACKUP_APP = "flower-tracker";
     const BACKUP_VERSION = 2;
@@ -412,6 +420,23 @@
       const h = Math.round(m / 60);
       if (h < 24) return h + " 小时前";
       return Math.round(h / 24) + " 天前";
+    }
+
+    // 时长格式化：用于心跳间隔（需要精确到秒，不能用 fmtAgo 的「X 分钟前」）
+    function fmtDur(ms) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      if (s < 60) return s + " 秒";
+      const m = Math.floor(s / 60);
+      if (m < 60) return (s % 60) ? `${m} 分 ${s % 60} 秒` : `${m} 分`;
+      const h = Math.floor(m / 60);
+      return (m % 60) ? `${h} 小时 ${m % 60} 分` : `${h} 小时`;
+    }
+
+    // 心跳间隔 → 结论："ok" | "throttle"（被降频，仍在跑）| "freeze"（被冻结过）
+    function hbJudge(gap) {
+      if (gap > HB_FREEZE_MS) return "freeze";
+      if (gap > HB_THROTTLE_MS) return "throttle";
+      return "ok";
     }
 
     // ========== 分享码（LZ-String 压缩，缺失时降级为 base64） ==========
@@ -991,6 +1016,9 @@
 
       // ========== 备份面板状态 ==========
       const [showBackup, setShowBackup] = useState(false);
+      const [hbVersion, setHbVersion] = useState(0); // 仅用于在面板打开时驱动诊断行刷新
+      const hbRef = React.useRef(null);              // 心跳统计（会话级，不持久化）
+      const showBackupRef = React.useRef(false);
       const [shareCode, setShareCode] = useState("");
       const [shareScope, setShareScope] = useState("full"); // full | accounts | prefs
       const [sharePaste, setSharePaste] = useState("");
@@ -1364,6 +1392,46 @@
           }
         };
       }, [loaded, accounts, accountReminders]);
+
+      // ========== 后台运行心跳 ==========
+      // 每 10 秒记一次「相邻两次心跳的实际间隔」。最小化 / 切后台时若被冻结，
+      // 间隔会出现远大于 10 秒的空档 —— 这是判断「提醒会不会失效」最直接的证据。
+      // 面板关闭时不 setState（避免整页无谓重渲染），只累计数据。
+      useEffect(() => {
+        const hb = {
+          startedAt: Date.now(), lastAt: Date.now(), ticks: 0,
+          maxGap: 0, maxGapAt: null, freezes: 0, throttles: 0,
+        };
+        hbRef.current = hb;
+        window.__hb = hb; // 便于控制台核对 / 自动化测试
+        const iv = setInterval(() => {
+          const now = Date.now();
+          const gap = now - hb.lastAt;
+          hb.lastAt = now;
+          hb.ticks += 1;
+          if (gap > hb.maxGap) { hb.maxGap = gap; hb.maxGapAt = now; }
+          const kind = hbJudge(gap);
+          if (kind === "freeze") hb.freezes += 1;
+          else if (kind === "throttle") hb.throttles += 1;
+          if (showBackupRef.current) setHbVersion(v => v + 1);
+        }, HB_TICK_MS);
+        return () => clearInterval(iv);
+      }, []);
+
+      // 面板打开时立即刷一次，否则要等最多 10 秒才看到最新统计
+      useEffect(() => {
+        showBackupRef.current = showBackup;
+        if (showBackup) setHbVersion(v => v + 1);
+      }, [showBackup]);
+
+      function resetHb() {
+        const hb = hbRef.current;
+        if (!hb) return;
+        hb.startedAt = Date.now();
+        hb.lastAt = Date.now();
+        hb.ticks = 0; hb.maxGap = 0; hb.maxGapAt = null; hb.freezes = 0; hb.throttles = 0;
+        setHbVersion(v => v + 1);
+      }
 
       useEffect(() => {
         const t = setInterval(() => setTick(n => n + 1), 20000);
@@ -5325,6 +5393,39 @@
                     })}
                   </div>
                 )}
+
+                {/* 后台运行诊断：用真实心跳间隔判断最小化后有没有被冻结 */}
+                {(() => {
+                  const hb = hbRef.current || { startedAt: Date.now(), lastAt: Date.now(), ticks: 0, maxGap: 0, maxGapAt: null, freezes: 0, throttles: 0 };
+                  const level = hb.freezes > 0 ? "freeze" : (hb.throttles > 0 ? "throttle" : "ok");
+                  const color = level === "freeze" ? C.wilted : (level === "throttle" ? C.urgent : C.alive);
+                  const label = level === "freeze" ? "曾被冻结" : (level === "throttle" ? "被降频（仍在跑）" : "正常");
+                  return (
+                    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 16, paddingTop: 14 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: C.accent }}>后台运行诊断</span>
+                        <button onClick={resetHb} style={tinyBtn(C.muted)}>重置</button>
+                      </div>
+                      <div style={{ fontSize: 12, color: C.text, lineHeight: 1.8 }}>
+                        <span style={{ color }}>● {label}</span>
+                        <span style={{ color: C.muted }}>　已运行 {fmtDur(Date.now() - hb.startedAt)} · 上次心跳 {fmtAgo(hb.lastAt)}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.8 }}>
+                        最长间隔 {hb.maxGap ? fmtDur(hb.maxGap) : "—"}
+                        {hb.maxGapAt ? `（${fmtBackupTime(new Date(hb.maxGapAt).toISOString())}）` : ""}
+                        {hb.freezes > 0 ? ` · 冻结 ${hb.freezes} 次` : ""}
+                        {hb.throttles > 0 ? ` · 降频 ${hb.throttles} 次` : ""}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: C.muted, lineHeight: 1.75, marginTop: 4 }}>
+                        {level === "freeze"
+                          ? "最小化后页面被系统冻结过：冻结期间的提醒会攒到恢复时一起响，不会按时提醒。把本站加入 Edge「设置 → 系统和性能 → 始终使这些网站保持活动状态」可避免。"
+                          : (level === "throttle"
+                            ? "最小化时浏览器把定时器降频到约 1 分钟一次（没有冻结）：提醒最多晚约 1 分钟，2 分钟档仍能命中。"
+                            : "每 10 秒一跳，最小化期间定时器在正常跑。切后台放 20 分钟以上再回来看这里，就能确认会不会休眠。")}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
