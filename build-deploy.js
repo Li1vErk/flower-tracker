@@ -131,7 +131,7 @@ if (!normInput(GATE_PASSWORD)) {
 const gateHtml = `
   <div id="xhx-gate" style="position:fixed;inset:0;z-index:99999;background:#0c0c10;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans SC','PingFang SC',system-ui,sans-serif">
     <div style="text-align:center;padding:28px;width:100%;max-width:320px">
-      <div style="font-size:34px;line-height:1;margin-bottom:16px">&#127812;</div>
+      <div style="font-size:34px;line-height:1;margin-bottom:16px">&#128174;</div>
       <div style="font-size:15px;color:#e0d8ec;margin-bottom:22px;letter-spacing:.5px">花园复活追踪</div>
       <input id="xhx-gate-input" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="访问口令"
         style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #2f2b3a;background:#16141d;color:#e0d8ec;font-size:15px;outline:none;box-sizing:border-box">
@@ -174,6 +174,51 @@ if (!html.includes('<div id="root"></div>')) {
 }
 html = html.replace('<div id="root"></div>', () => '<div id="root"></div>' + gateHtml);
 report.push(`已加访问口令层（口令：${GATE_PASSWORD}，哈希 ${gateHash}，输入容错：忽略空格/全角/大小写）`);
+
+// ---------- 6.5 应用图标 + manifest ----------
+// 页面会被「安装成应用 / 添加到主屏幕」：Chromium 安装时优先用 manifest 的 icons，
+// 没有 manifest 就把 favicon 放大，又小又糊。这里注入一个运行时拼装的内联
+// manifest（data URI，不破坏单文件、零外部请求），并用同一张 PNG 换掉 emoji favicon。
+// start_url 不能写死（部署地址因人而异），所以在运行期用 location 现算。
+const ICON_PATH = path.join(ROOT, "icon-512.png");
+if (fs.existsSync(ICON_PATH)) {
+  const iconUri = "data:image/png;base64," + fs.readFileSync(ICON_PATH).toString("base64");
+  const faviconRe = /<link rel="icon"\s+href="data:image\/svg\+xml[^>]*>/;
+  if (!faviconRe.test(html)) {
+    console.error("! 源文件里找不到 emoji favicon，应用图标注入跳过。");
+  } else {
+    html = html.replace(faviconRe, () =>
+      '<link rel="icon" type="image/png" sizes="512x512" href="' + iconUri + '">');
+    const manifestScript = `
+  <meta name="theme-color" content="#17141f">
+  <script>
+    (function () {
+      try {
+        var icon = "${iconUri}";
+        var isHttp = location.protocol === "https:" || location.protocol === "http:";
+        var m = {
+          name: "\\u82B1\\u56ED\\u590D\\u6D3B\\u8FFD\\u8E2A",
+          short_name: "\\u82B1\\u56ED\\u8FFD\\u8E2A",
+          description: "\\u591A\\u8D26\\u53F7\\u82B1\\u6735\\u67AF\\u840E\\u5012\\u8BA1\\u65F6\\u4E0E\\u6536\\u96C6\\u8FDB\\u5EA6\\u8FFD\\u8E2A",
+          start_url: isHttp ? location.origin + location.pathname : "./",
+          display: "standalone",
+          background_color: "#17141f",
+          theme_color: "#17141f",
+          icons: [{ src: icon, sizes: "512x512", type: "image/png", purpose: "any" }]
+        };
+        var link = document.createElement("link");
+        link.rel = "manifest";
+        link.href = "data:application/manifest+json," + encodeURIComponent(JSON.stringify(m));
+        document.head.appendChild(link);
+      } catch (e) { }
+    })();
+  </script>`;
+    html = html.replace("</head>", () => manifestScript + "\n</head>");
+    report.push("已注入应用图标（512px PNG 内联：favicon 替换 + 运行时 manifest，装成应用不再是放大版 emoji）");
+  }
+} else {
+  console.error("! 缺少 icon-512.png，跳过应用图标注入（安装后仍是 favicon 放大版）。");
+}
 
 // ---------- 7. 构建期自检 ----------
 const leaks = [];

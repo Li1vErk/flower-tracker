@@ -487,6 +487,7 @@ node build-deploy.js 你的口令
 | JSX 预编译 | 不再需要 2.8MB 的 babel-standalone，编译在构建期完成 |
 | 字体异步 | Google Fonts 改为非阻塞加载，取不到就用系统字体，**不会白屏** |
 | 访问口令 | 打开页面先输入口令（存在 `sessionStorage`，关标签页后需重输）。口令是客户端校验，防路人而非防技术攻击——页面上本来就没有数据，数据都在各自浏览器的存储里 |
+| 应用图标 | 内置 512px 自绘花朵图标（`icon-512.png`，构建时内联成 data URI）：favicon 换成这张 PNG，并在运行期注入 manifest（`start_url` 按部署地址现算）——「安装成应用 / 添加到主屏幕」直接得到高清图标，不再把 emoji favicon 放大 |
 | noindex | 不被搜索引擎收录 |
 
 > 仓库里只保留**源文件** `flower-tracker.html`（双击即用、无口令）。`deploy/index.html` 是构建产物、内含访问口令的哈希，**不入库**（`.gitignore` 里已忽略 `deploy/`）——想要带口令的版本，自己跑一次上面的命令生成即可。
