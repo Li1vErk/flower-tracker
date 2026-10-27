@@ -393,8 +393,13 @@ const useNewFormat = forceFormat2 || text.includes('#');
 
 点击双色花的「复活」，会先弹出**分配弹窗**：
 
-- **单朵模式**：为每个珍稀目标输入分配数量，总和不得超过该花总数，剩余部分自动归为「其他颜色」（不计入收集）。
-- **批量模式**（「全部复活」且含双色花时）：一次性列出所有双色花逐个分配，确认时逐个校验。
+- **单朵模式**：为每个珍稀目标输入分配数量，总和不得超过该花总数。**没填的余额由 `fillDualRemainder()` 补齐**：
+  - 两种颜色都珍稀（红黄蔷薇、黄白蔷薇、粉蓝夕雾…）→ 余额自动补给另一种颜色，弹窗实时写明补给谁
+    （如 3 棵红黄蔷薇填「红色蔷薇 1」，剩下 2 棵归「黄色蔷薇」）；
+  - 另一种颜色是普通花（紫黑罗布麻的紫、七彩红彩虹菊的红…）→ 余额就是普通花，不写进收集进度，
+    弹窗会写明「剩余 N 棵是普通颜色，不计入收集目标」。
+- **批量模式**（「全部复活」且含双色花时）：一次性列出所有双色花逐个分配，确认时逐个校验，
+  余额补齐口径与单朵模式完全一致（共用同一个 `fillDualRemainder()`）。
 
 只有落在 `RARE_FLOWERS` 里的目标份额才会写进收集进度。
 
@@ -556,7 +561,7 @@ D:\[测试笔刷\（或 D:\Code\flower-tracker）
 | 存储工具 | `readJSON` `writeJSON` `stableFlowerKey` `stripSelected` |
 | 备份工具 | `buildBackup` `parseBackup` `mergeAccountList` `mergeGoals` `encodeShare` `decodeShare` `pushSnapshot` `fmtBackupTime` |
 | 云同步 | `buildSyncPayload` `syncPull` `syncHeartbeat` `doPush` `forcePullFromCloud` `applySyncPayload` `adoptRemote` `resolveConflict*`（整份快照 + rev 乐观锁 + 心跳 + 冲突弹窗） |
-| 双色花工具 | `getDualColorTargets` `extractColorsFromName` `isDualColorFlower` `getRareTargetsFromDual` |
+| 双色花工具 | `getDualColorTargets` `extractColorsFromName` `isDualColorFlower` `getRareTargetsFromDual` `isAllRareDual` `fillDualRemainder` |
 | 收集统计 | `getFlowerWiltCount14Days` `getEstimatedDays` `getAccountFlowerStats` `addToCollection` |
 | 日历 | `getCalendarData` `getWiltDate` `getTodayStart` |
 | 提醒 | `addToast` `playBeep` `playWiltedBeep` `flashTitle` `getAudioCtx` + 轮询 `useEffect` |
@@ -596,7 +601,7 @@ D:\[测试笔刷\（或 D:\Code\flower-tracker）
 
 **代码相关**
 
-7. **批量双色花分配弹窗直接改状态对象**（`flower.rareTargetsAllocations = ...`，输入框用 `defaultValue` 非受控），能跑通但绕过了 React 的状态流，属于脆弱写法。
+7. ~~**批量双色花分配弹窗直接改状态对象**~~ 已修（2026-10-27）：批量输入框改为**受控**，分配数组放在 `dualColorModal.allocations` 里走 `setDualColorModal` 更新，余额去向才能实时渲染。
 8. **`_selected`（批量删除的勾选标记）会留在内存与 localStorage 里**，只在导出 / 合并时被 `stripSelected` / `mergeGoals` 剥掉。它不是持久化数据，理想做法是移出主体状态。
 9. 逻辑中大量使用 `window.__xxx` 挂全局变量（长按定时器、提醒状态、轮询句柄、调试接口），多实例/多标签页共存时会互相干扰。
 10. **「账号 ID」与内部 `id` 双主键并存**：备份、提醒、折叠、置顶、今日去重都以 `accountId` 为键，所以账号 ID 是事实上的主键；重命名时会同步迁移（已修），但外部若直接改 localStorage 会留下孤儿记录。

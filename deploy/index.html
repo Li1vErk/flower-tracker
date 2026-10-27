@@ -1040,6 +1040,27 @@ function getRareTargetsFromDual(dualName) {
   if (!targets) return [];
   return targets.filter(t => RARE_FLOWERS.includes(t));
 }
+function isAllRareDual(dualName) {
+  const all = getDualColorTargets(dualName);
+  return Array.isArray(all) && all.length === 2 && all.every(t => RARE_FLOWERS.includes(t));
+}
+function fillDualRemainder(dualName, count, targets, allocations) {
+  const alloc = (targets || []).map((_, i) => Math.max(0, allocations && allocations[i] || 0));
+  const used = alloc.reduce((a, b) => a + b, 0);
+  const rest = Math.max(0, (count || 0) - used);
+  let to = null;
+  if (rest > 0 && alloc.length === 2 && isAllRareDual(dualName)) {
+    let idx = alloc.findIndex(v => v === 0);
+    if (idx < 0) idx = 1;
+    alloc[idx] += rest;
+    to = targets[idx];
+  }
+  return {
+    alloc,
+    rest,
+    to
+  };
+}
 const THEMES = {
   dark: {
     bg: "#19191D",
@@ -3095,6 +3116,7 @@ function App() {
       setDualColorModal({
         mode: 'batch',
         flowers: dualColorFlowers,
+        allocations: dualColorFlowers.map(f => f.rareTargets.map(() => 0)),
         singleColorFlowers: singleColorFlowers,
         accountId: accountId,
         onConfirm: allAllocations => {
@@ -4983,7 +5005,11 @@ function App() {
       borderTop: `1px solid ${C.border}`,
       marginTop: 4
     }
-  }, "\u5269\u4F59 ", dualColorModal.count - dualColorModal.allocations.reduce((a, b) => a + b, 0), " \u68F5\u81EA\u52A8\u5F52\u4E3A\u5176\u4ED6\u989C\u8272")) : React.createElement("div", {
+  }, (() => {
+    const r = fillDualRemainder(dualColorModal.flowerName, dualColorModal.count, dualColorModal.targets, dualColorModal.allocations);
+    if (r.rest <= 0) return "已分配完，没有剩余";
+    return r.to ? `剩余 ${r.rest} 棵自动归为「${r.to}」` : `剩余 ${r.rest} 棵是普通颜色，不计入收集目标`;
+  })())) : React.createElement("div", {
     style: {
       display: "flex",
       flexDirection: "column",
@@ -5028,11 +5054,19 @@ function App() {
     type: "number",
     min: 0,
     max: flower.count,
-    defaultValue: 0,
+    value: (dualColorModal.allocations[fIdx] || [])[tIdx] || 0,
     onChange: e => {
       const val = parseInt(e.target.value) || 0;
-      flower.rareTargetsAllocations = flower.rareTargetsAllocations || flower.rareTargets.map(() => 0);
-      flower.rareTargetsAllocations[tIdx] = Math.max(0, Math.min(val, flower.count));
+      const clamped = Math.max(0, Math.min(val, flower.count));
+      setDualColorModal(m => {
+        if (!m) return m;
+        const next = m.allocations.map(row => row.slice());
+        next[fIdx][tIdx] = clamped;
+        return {
+          ...m,
+          allocations: next
+        };
+      });
     },
     style: {
       width: 60,
@@ -5051,7 +5085,17 @@ function App() {
       fontSize: 11,
       color: C.muted
     }
-  }, "/ ", flower.count))))))), React.createElement("div", {
+  }, "/ ", flower.count)))), (() => {
+    const r = fillDualRemainder(flower.name, flower.count, flower.rareTargets, dualColorModal.allocations[fIdx] || []);
+    if (r.rest <= 0) return null;
+    return React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: C.muted,
+        marginTop: 8
+      }
+    }, r.to ? `剩余 ${r.rest} 棵自动归为「${r.to}」` : `剩余 ${r.rest} 棵是普通颜色，不计入收集目标`);
+  })()))), React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
@@ -5065,21 +5109,21 @@ function App() {
           alert(`分配总数不能超过 ${dualColorModal.count}`);
           return;
         }
-        dualColorModal.onConfirm(dualColorModal.allocations);
+        const filled = fillDualRemainder(dualColorModal.flowerName, dualColorModal.count, dualColorModal.targets, dualColorModal.allocations).alloc;
+        dualColorModal.onConfirm(filled);
       } else {
-        const allAllocations = dualColorModal.flowers.map(f => ({
-          targets: f.rareTargets,
-          allocations: f.rareTargetsAllocations || f.rareTargets.map(() => 0)
-        }));
         for (let i = 0; i < dualColorModal.flowers.length; i++) {
           const f = dualColorModal.flowers[i];
-          const alloc = allAllocations[i].allocations;
-          const total = alloc.reduce((a, b) => a + b, 0);
+          const total = (dualColorModal.allocations[i] || []).reduce((a, b) => a + b, 0);
           if (total > f.count) {
             alert(`${f.name} 的分配总数不能超过 ${f.count}`);
             return;
           }
         }
+        const allAllocations = dualColorModal.flowers.map((f, i) => ({
+          targets: f.rareTargets,
+          allocations: fillDualRemainder(f.name, f.count, f.rareTargets, dualColorModal.allocations[i] || []).alloc
+        }));
         dualColorModal.onConfirm(allAllocations);
       }
     },
