@@ -2390,13 +2390,17 @@
 
       // ========== 收集进度相关函数 ==========
 
-      // 计算某花在「未来 14 天窗口」内的枯萎总数（所有账号）
-      // 窗口为 [今天, 今天+14 天]，即包含第 14 天这一格 —— 见下方边界说明
-      // 单色花按100%计算，双色花按50%计算，昙花14天内会枯萎7轮所以乘7
-      function getFlowerWiltCount14Days(flowerName) {
+      // 某花在未来 15 天里「每天会新枯萎多少朵可复活的」（下标 0 = 今天，14 = 第 14 天）
+      // - 单色花按 100% 计，双色花按 50% 计（另一半颜色是普通花）
+      // - 今天之前就枯萎的（积压）全部算到第 0 天：枯萎不消失，随时可以补复活
+      // - 昙花 48 小时一轮，从枯萎日起每 2 天重复计入，直到窗口末尾
+      // 边界必须取 dayIndex <= 14（含第 14 天这一格）：默认存活 336h 正好 14 天，
+      // 刚复活的花枯萎日恰好落在第 14 格，排除它会造成「复活后预计天数反而变长」的假象。
+      function getFlowerSupplyByDay(flowerName) {
         const todayStart = getTodayStart();
-        let singleColorCount = 0;   // 单色花数量
-        let dualColorCount = 0;     // 双色花数量（目标包含该珍稀花的）
+        const DAY_MS = 86400000;
+        const supply = new Array(15).fill(0);
+        const isEphemeral = flowerName.includes("昙花");
 
         accounts.forEach(a => {
           a.flowers.forEach(f => {
@@ -2404,60 +2408,76 @@
             const rem = remMs(f);
             if (rem === null) return;
 
-            // 统计窗口内的枯萎（含已枯萎的）
-            // 边界必须取 dayIndex <= 14（含第 14 天这一格）：
-            // 默认存活时长 336h 正好是 14 天，刚复活的花枯萎日恰好落在第 14 格，
-            // 若按 dayIndex >= 14 排除，它就会从分母里消失，
-            // 造成「复活后进度增加、预计天数反而变长」的假象。
-            const wiltDate = getWiltDate(f.revivalTime, f.durationMs);
-            const dayIndex = Math.floor((wiltDate - todayStart) / 86400000);
-            if (dayIndex < 0 || dayIndex > 14) return;
-
-            const normalizedName = f.name.replace(/^\d+/, ""); // 去掉前缀数字
-
-            // 判断是单色还是双色
+            const normalizedName = f.name.replace(/^\d+/, ""); // 去掉批次前缀数字
             const rareTargets = getRareTargetsFromDual(f.name);
 
+            // 权重：单色 1.0 / 双色 0.5（目标不含该珍稀花的直接跳过）
+            let weight = 0;
             if (rareTargets.length === 0) {
-              // 单色花：直接匹配花名
-              if (normalizedName.includes(flowerName)) {
-                singleColorCount += f.count;
-              }
+              if (!normalizedName.includes(flowerName)) return;
+              weight = f.count;
             } else {
-              // 双色花：检查目标是否包含当前统计的珍稀花
-              if (rareTargets.includes(flowerName)) {
-                dualColorCount += f.count;
-              }
+              if (!rareTargets.includes(flowerName)) return;
+              weight = f.count * 0.5;
+            }
+            if (weight <= 0) return;
+
+            let dayIndex = Math.floor((f.revivalTime + f.durationMs - todayStart) / DAY_MS);
+            if (dayIndex < 0) dayIndex = 0; // 已枯萎的算成积压，落在今天
+            if (dayIndex > 14) return;
+
+            if (isEphemeral) {
+              for (let d = dayIndex; d <= 14; d += 2) supply[d] += weight;
+            } else {
+              supply[dayIndex] += weight;
             }
           });
         });
 
-        // 单色花100% + 双色花50%
-        const effectiveCount = singleColorCount + dualColorCount * 0.5;
-
-        // 昙花特殊处理：48小时周期，14天内会枯萎7轮
-        const isEphemeral = flowerName.includes('昙花');
-        const multiplier = isEphemeral ? 7 : 1;
-
-        return effectiveCount * multiplier;
+        return supply;
       }
 
-      // 计算预计完成天数
-      // 注意：getFlowerWiltCount14Days 已经考虑了昙花的7倍乘数
-      // 所以这里直接除以14就是每天平均可获得数量
+      // 窗口 14 天内该花可复活的总朵数（折算后）
+      function getFlowerWiltCount14Days(flowerName) {
+        return getFlowerSupplyByDay(flowerName).reduce((sum, v) => sum + v, 0);
+      }
+
+      // 计算预计完成天数：逐日累计模拟（不再是「14 天平均」）
       //
-      // 日均要按每日额度封顶：供给再多，一天也只有前 DAILY_QUOTA 株复活会奖励花，
-      // 超出的只能顺延到第二天。供给不超额度时封顶不生效（不误伤正常情况）；
-      // 供给饱和时吞吐恒定在 DAILY_QUOTA/天，「剩余 ÷ DAILY_QUOTA」正好是精确解。
+      // 为什么改成逐日模拟：枯萎是成批来的（今天可能一次枯 13 棵，后面几天只有零散几棵），
+      // 用「14 天总量 ÷ 14」会把今天这批摊平到两周里，导致明明今天够、却显示要好几天。
+      //
+      // 规则：
+      // - 供给按天到达，今天已枯萎的都算今天到手；枯萎不消失，所以没用完的可顺延
+      // - 每天能复活的株数受额度封顶（游戏里每天前 DAILY_QUOTA 株复活才奖励花）
+      // - 今天要扣掉已经用掉的额度
+      // - 仍然保留「额度只花在这一种花上」的乐观假设
+      //
+      // 返回：1 = 今天就能完成；2 = 明天；……；0 = 已完成；null = 窗口内无供给数据
       function getEstimatedDays(flowerName, needed, owned) {
         const remaining = needed - owned;
         if (remaining <= 0) return 0;
-        const effectiveCount14 = getFlowerWiltCount14Days(flowerName);
-        if (effectiveCount14 <= 0) return null; // 无法计算
-        const rawPerDay = effectiveCount14 / 14;
-        const perDay = Math.min(rawPerDay, DAILY_QUOTA);
-        const days = remaining / perDay;
-        return Math.ceil(days);
+
+        const supply = getFlowerSupplyByDay(flowerName);
+        const total = supply.reduce((sum, v) => sum + v, 0);
+        if (total <= 0) return null;
+
+        const usedToday = Math.max(0, Math.min(DAILY_QUOTA, todayRevived || 0));
+        let arrived = 0; // 累计已枯萎、可复活的朵数
+        let gained = 0;  // 已经算作「能拿到」的朵数
+
+        for (let d = 0; d <= 14; d++) {
+          arrived += supply[d];
+          const dayCap = d === 0 ? Math.max(0, DAILY_QUOTA - usedToday) : DAILY_QUOTA;
+          const gain = Math.min(arrived - gained, dayCap);
+          if (gain > 0) gained += gain;
+          if (gained >= remaining) return d + 1;
+        }
+
+        // 14 天窗口内凑不够：之后按窗口内的平均日供给继续外推
+        const perDay = Math.min(total / 14, DAILY_QUOTA);
+        if (perDay <= 0) return null;
+        return 15 + Math.ceil((remaining - gained) / perDay);
       }
 
       // 统计账号中某花的实际数量（单色+双色），只统计有枯萎时间记录的花
@@ -4710,16 +4730,21 @@
                   flexShrink: 0,
                 }}>
                   <div style={{ color: C.text, fontWeight: 600, marginBottom: 4 }}>
-                    预计天数 = 还缺的朵数 ÷ 日均获得量
+                    预计天数 = 从今天起逐日累计，攒够还缺的朵数要几天
                   </div>
                   <div>
-                    日均按「今天起 14 天内会枯萎的花」折算，并<span style={{ color: C.urgent }}>封顶 {DAILY_QUOTA} 朵/天</span>——游戏里每天前 {DAILY_QUOTA} 株复活才有奖励，超出的只能顺延，积压再多也快不过这个速度。
+                    供给按每天实际会枯萎的数量累加：今天已枯萎（含积压）的都算今天到手，之后每天加上当天新枯的；
+                    枯萎不会消失，所以当天没用完的可以顺延。
+                  </div>
+                  <div>
+                    每天最多算<span style={{ color: C.urgent }}> {DAILY_QUOTA} 朵</span>——游戏里每天前 {DAILY_QUOTA} 株复活才有奖励，
+                    加速也快不过这个速度；今天的额度已经用掉的部分不计入。
                   </div>
                   <div style={{ marginTop: 4 }}>
-                    这是<strong style={{ color: C.text }}>乐观口径</strong>：相当于假设这段时间的复活额度都只花在这一种花上。同时推进多个目标时它们会互相争额度，实际天数会比显示的更长。
+                    这是<strong style={{ color: C.text }}>乐观口径</strong>：相当于假设复活额度都只花在这一种花上。同时推进多个目标时它们会互相争额度，实际天数会比显示的更长。
                   </div>
                   <div style={{ marginTop: 4 }}>
-                    双色花按 50% 计入（另一半颜色是普通花）；昙花 48 小时一轮，按 14 天 7 轮折算。
+                    双色花按 50% 计入（另一半颜色是普通花）；昙花 48 小时一轮，按每 2 天重复计入。
                   </div>
                 </div>
               )}
@@ -5049,7 +5074,9 @@
                                   ? "暂无数据"
                                   : estimatedDays === 0
                                     ? "即将完成"
-                                    : `预计 ${estimatedDays} 天`}
+                                    : estimatedDays === 1
+                                      ? "今天可完成"
+                                      : `预计 ${estimatedDays} 天`}
                           </span>
                         </div>
                       </div>
