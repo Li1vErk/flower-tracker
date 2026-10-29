@@ -21,6 +21,13 @@ const OUT = path.join(OUT_DIR, "index.html");
 const GATE_PASSWORD = process.argv[2] || "huayuan";
 const GATE_KEY = "xhx-gate-ok";
 
+// 应用图标（自绘花朵去底版）：512 给 manifest，64 给 favicon / 口令层 / 台头
+const ICON_512 = path.join(ROOT, "icon-512.png");
+const ICON_64 = path.join(ROOT, "icon-64.png");
+const hasIcons = fs.existsSync(ICON_512) && fs.existsSync(ICON_64);
+const icon512Uri = hasIcons ? "data:image/png;base64," + fs.readFileSync(ICON_512).toString("base64") : "";
+const icon64Uri = hasIcons ? "data:image/png;base64," + fs.readFileSync(ICON_64).toString("base64") : "";
+
 function readVendor(name) {
   const p = path.join(VENDOR, name);
   if (!fs.existsSync(p)) {
@@ -130,8 +137,10 @@ if (!normInput(GATE_PASSWORD)) {
 }
 const gateHtml = `
   <div id="xhx-gate" style="position:fixed;inset:0;z-index:99999;background:#0c0c10;display:flex;align-items:center;justify-content:center;font-family:'Noto Sans SC','PingFang SC',system-ui,sans-serif">
-    <div style="text-align:center;padding:28px;width:100%;max-width:320px">
-      <div style="font-size:34px;line-height:1;margin-bottom:16px">&#128174;</div>
+      <div style="text-align:center;padding:28px;width:100%;max-width:320px">
+      ${hasIcons
+        ? '<img src="' + icon64Uri + '" alt="" style="width:46px;height:46px;margin:0 auto 14px;display:block">'
+        : '<div style="font-size:34px;line-height:1;margin-bottom:16px">&#128174;</div>'}
       <div style="font-size:15px;color:#e0d8ec;margin-bottom:22px;letter-spacing:.5px">花园复活追踪</div>
       <input id="xhx-gate-input" type="password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="访问口令"
         style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #2f2b3a;background:#16141d;color:#e0d8ec;font-size:15px;outline:none;box-sizing:border-box">
@@ -178,23 +187,23 @@ report.push(`已加访问口令层（口令：${GATE_PASSWORD}，哈希 ${gateHa
 // ---------- 6.5 应用图标 + manifest ----------
 // 页面会被「安装成应用 / 添加到主屏幕」：Chromium 安装时优先用 manifest 的 icons，
 // 没有 manifest 就把 favicon 放大，又小又糊。这里注入一个运行时拼装的内联
-// manifest（data URI，不破坏单文件、零外部请求），并用同一张 PNG 换掉 emoji favicon。
+// manifest（data URI，不破坏单文件、零外部请求），favicon 换成 64px PNG（标签页 16px 下比 emoji 清晰）。
 // start_url 不能写死（部署地址因人而异），所以在运行期用 location 现算。
-const ICON_PATH = path.join(ROOT, "icon-512.png");
-if (fs.existsSync(ICON_PATH)) {
-  const iconUri = "data:image/png;base64," + fs.readFileSync(ICON_PATH).toString("base64");
-  const faviconRe = /<link rel="icon"\s+href="data:image\/svg\+xml[^>]*>/;
+// 注意：favicon 的 href 里没有双引号，正则用 [^"]* 精确吃到整个属性值——
+// 之前用 [^>]* 会被 data URI 里的 `>` 截断，留下半截 emoji 垃圾尾巴。
+if (hasIcons) {
+  const faviconRe = /<link rel="icon"[^>]*href="[^"]*">/;
   if (!faviconRe.test(html)) {
-    console.error("! 源文件里找不到 emoji favicon，应用图标注入跳过。");
+    console.error("! 源文件里找不到 favicon，应用图标注入跳过。");
   } else {
     html = html.replace(faviconRe, () =>
-      '<link rel="icon" type="image/png" sizes="512x512" href="' + iconUri + '">');
+      '<link rel="icon" type="image/png" sizes="64x64" href="' + icon64Uri + '">');
     const manifestScript = `
   <meta name="theme-color" content="#17141f">
   <script>
     (function () {
       try {
-        var icon = "${iconUri}";
+        var icon = "${icon512Uri}";
         var isHttp = location.protocol === "https:" || location.protocol === "http:";
         var m = {
           name: "\\u82B1\\u56ED\\u590D\\u6D3B\\u8FFD\\u8E2A",
@@ -214,10 +223,10 @@ if (fs.existsSync(ICON_PATH)) {
     })();
   </script>`;
     html = html.replace("</head>", () => manifestScript + "\n</head>");
-    report.push("已注入应用图标（512px PNG 内联：favicon 替换 + 运行时 manifest，装成应用不再是放大版 emoji）");
+    report.push("已注入应用图标（透明底 512px PNG 走 manifest，favicon/口令层用 64px 版）");
   }
 } else {
-  console.error("! 缺少 icon-512.png，跳过应用图标注入（安装后仍是 favicon 放大版）。");
+  console.error("! 缺少 icon-512.png / icon-64.png，跳过应用图标注入。");
 }
 
 // ---------- 7. 构建期自检 ----------
